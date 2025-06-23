@@ -85,7 +85,7 @@ router.put("/:id", async (req, res) => {
            category = $4,
            team_name = $5,
            district = $6, 
-           comment = $7,
+           comment = $7
        WHERE id = $8
        RETURNING *`,
       [
