@@ -25,21 +25,12 @@ router.post("/", async (req, res) => {
       category,
       team_name,
       district,
-      comment,
     } = req.body;
 
     const result = await pool.query(
-      `INSERT INTO participants (player1_name, player2_name, phone_number, category, created_at, team_name, district, comment) 
+      `INSERT INTO participants (player1_name, player2_name, phone_number, category, created_at, team_name, district) 
        VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7) RETURNING *`,
-      [
-        player1_name,
-        player2_name,
-        phone_number,
-        category,
-        team_name,
-        district,
-        comment,
-      ]
+      [player1_name, player2_name, phone_number, category, team_name, district]
     );
 
     res.json(result.rows[0]);
@@ -82,6 +73,7 @@ router.put("/:id", async (req, res) => {
       category,
       team_name,
       district,
+      comment,
     } = req.body;
 
     // Update participant
@@ -92,8 +84,9 @@ router.put("/:id", async (req, res) => {
            phone_number = $3,
            category = $4,
            team_name = $5,
-           district = $6
-       WHERE id = $7
+           district = $6, 
+           comment = $7,
+       WHERE id = $8
        RETURNING *`,
       [
         player1_name,
@@ -102,6 +95,7 @@ router.put("/:id", async (req, res) => {
         category,
         team_name,
         district,
+        comment,
         id,
       ]
     );
