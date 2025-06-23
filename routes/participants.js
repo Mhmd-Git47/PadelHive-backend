@@ -28,8 +28,12 @@ router.post("/", async (req, res) => {
     } = req.body;
 
     const result = await pool.query(
-      `INSERT INTO participants (player1_name, player2_name, phone_number, category, created_at, team_name, district) 
-       VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7) RETURNING *`,
+      `INSERT INTO participants (
+     player1_name, player2_name, phone_number, category, 
+     created_at, team_name, district
+   ) 
+   VALUES ($1, $2, $3, $4, NOW(), $5, $6)
+   RETURNING *`,
       [player1_name, player2_name, phone_number, category, team_name, district]
     );
 
