@@ -1,5 +1,5 @@
 const axios = require("axios");
-require('dotenv').config();
+require("dotenv").config();
 
 const BASE_URL = "https://api.challonge.com/v1";
 const API_KEY = process.env.CHALLONGE_API_KEY;
@@ -24,9 +24,12 @@ exports.getTournament = async (id) => {
 };
 
 exports.getParticipants = async (id) => {
-  const res = await axios.get(`${BASE_URL}/tournaments/${id}/participants.json`, {
-    params: { api_key: API_KEY },
-  });
+  const res = await axios.get(
+    `${BASE_URL}/tournaments/${id}/participants.json`,
+    {
+      params: { api_key: API_KEY },
+    }
+  );
   return res.data;
 };
 
@@ -44,15 +47,14 @@ exports.getStandings = async (id) => {
 
   const participants = res.data.tournament.participants;
   const sorted = participants
-    .filter(p => p.participant.final_rank !== null)
+    .filter((p) => p.participant.final_rank !== null)
     .sort((a, b) => a.participant.final_rank - b.participant.final_rank);
 
-  return sorted.map(p => ({
+  return sorted.map((p) => ({
     name: p.participant.name,
     finalRank: p.participant.final_rank,
   }));
 };
-
 
 exports.getGroupStandings = async (id) => {
   const [participantsRes, matchesRes] = await Promise.all([
@@ -79,6 +81,7 @@ exports.getGroupStandings = async (id) => {
       losesPoints: 0,
       totalScore: 0,
       history: [],
+      match_diffs: 0,
     };
   });
 
@@ -93,9 +96,15 @@ exports.getGroupStandings = async (id) => {
       if (s1 > s2) {
         p1.setWins++;
         p2.losesPoints += s2;
+        diff = s1 - s2;
+        p1.match_diffs += diff;
+        p2.match_diffs -= diff;
       } else if (s2 > s1) {
         p2.setWins++;
         p1.losesPoints += s1;
+        diff = s2 - s1;
+        p2.match_diffs += diff;
+        p1.match_diffs -= diff;
       }
 
       p1.totalScore += s1;
@@ -122,4 +131,3 @@ exports.getGroupStandings = async (id) => {
 
   return Object.values(stats);
 };
-
