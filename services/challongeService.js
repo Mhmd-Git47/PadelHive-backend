@@ -12,10 +12,15 @@ exports.getAllTournaments = async () => {
 };
 
 exports.getTournament = async (id) => {
-  const res = await axios.get(`${BASE_URL}/tournaments/${id}.json`, {
-    params: { api_key: API_KEY },
-  });
-  return res.data;
+  try {
+    const res = await axios.get(`${BASE_URL}/tournaments/${id}.json`, {
+      params: { api_key: API_KEY },
+    });
+    return res.data;
+  } catch (err) {
+    console.error(`Failed to fetch tournament ${id}:`, err.message);
+    throw err;
+  }
 };
 
 exports.getParticipants = async (id) => {
@@ -48,6 +53,7 @@ exports.getStandings = async (id) => {
   }));
 };
 
+
 exports.getGroupStandings = async (id) => {
   const [participantsRes, matchesRes] = await Promise.all([
     axios.get(`${BASE_URL}/tournaments/${id}/participants.json`, {
@@ -58,11 +64,11 @@ exports.getGroupStandings = async (id) => {
     }),
   ]);
 
-  const participants = participantsRes.data.map(p => p.participant);
-  const matches = matchesRes.data.map(m => m.match);
+  const participants = participantsRes.data.map((p) => p.participant);
+  const matches = matchesRes.data.map((m) => m.match);
   const stats = {};
 
-  participants.forEach(p => {
+  participants.forEach((p) => {
     stats[p.group_player_ids[0]] = {
       participant_id: p.id,
       name: p.name,
@@ -70,39 +76,50 @@ exports.getGroupStandings = async (id) => {
       matchWins: 0,
       matchLosses: 0,
       matchTies: 0,
-      points: 0,
+      losesPoints: 0,
       totalScore: 0,
       history: [],
     };
   });
 
-  matches.forEach(match => {
+  matches.forEach((match) => {
     const p1 = stats[match.player1_id];
     const p2 = stats[match.player2_id];
-    if (!p1 || !p2) return;
+    if (!p1 || !p2 || match.state !== "complete") return;
 
     const scores = match.scores_csv?.split(",") || [];
-    scores.forEach(score => {
+    scores.forEach((score) => {
       const [s1, s2] = score.split("-").map(Number);
-      if (s1 > s2) p1.setWins++;
-      else if (s2 > s1) p2.setWins++;
+      if (s1 > s2) {
+        p1.setWins++;
+        p2.losesPoints += s2;
+      } else if (s2 > s1) {
+        p2.setWins++;
+        p1.losesPoints += s1;
+      }
 
       p1.totalScore += s1;
       p2.totalScore += s2;
     });
 
     if (match.winner_id === match.player1_id) {
-      p1.matchWins++; p1.points += 3; p1.history.push("W");
-      p2.matchLosses++; p2.history.push("L");
+      p1.matchWins++;
+      p1.history.push("W");
+      p2.matchLosses++;
+      p2.history.push("L");
     } else if (match.winner_id === match.player2_id) {
-      p2.matchWins++; p2.points += 3; p2.history.push("W");
-      p1.matchLosses++; p1.history.push("L");
+      p2.matchWins++;
+      p2.history.push("W");
+      p1.matchLosses++;
+      p1.history.push("L");
     } else {
-      p1.matchTies++; p2.matchTies++;
-      p1.points++; p2.points++;
-      p1.history.push("T"); p2.history.push("T");
+      p1.matchTies++;
+      p2.matchTies++;
+      p1.history.push("T");
+      p2.history.push("T");
     }
   });
 
   return Object.values(stats);
 };
+
