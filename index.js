@@ -14,6 +14,8 @@ const stageRoutes = require("./routes/stage.routes");
 const paymentsRoutes = require("./routes/payments.routes");
 const companyRoutes = require("./routes/company.routes");
 
+const pool = require("./db");
+
 require("dotenv").config();
 
 const app = express();
