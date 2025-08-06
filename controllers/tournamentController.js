@@ -53,3 +53,12 @@ exports.getGroupStandings = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+exports.createTournament = async (req, res) => {
+  try {
+    const tournament = await challonge.createTournament(req.body);
+    res.status(201).json(tournament);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to create tournament" });
+  }
+};
