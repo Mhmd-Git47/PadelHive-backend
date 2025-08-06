@@ -25,6 +25,7 @@ const pool = new Pool({
   ssl: {
     rejectUnauthorized: false,
   },
+  max: 5,
 });
 
 // Optional: test connection immediately
