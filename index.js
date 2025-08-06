@@ -63,6 +63,17 @@ app.use("/api/admin", adminRoutes);
 // app.use("/api/groups", groupRoutes);
 // app.use("/api/stages", stageRoutes);
 
+app.get("/test-db", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT NOW()");
+    console.log("✅ /test-db query result:", result.rows[0]);
+    res.send(`Database time: ${result.rows[0].now}`);
+  } catch (error) {
+    console.error("❌ /test-db error:", error.message);
+    res.status(500).send("Database connection failed");
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
