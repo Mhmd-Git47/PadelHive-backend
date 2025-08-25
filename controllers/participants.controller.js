@@ -79,6 +79,6 @@ exports.deleteParticipant = async (req, res) => {
     const result = await participantService.deleteParticipant(id);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: "Error deleting participant" });
+    res.status(500).json({ error: "Error deleting participant: ", err });
   }
 };

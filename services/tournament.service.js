@@ -1,17 +1,36 @@
 const pool = require("../db");
-const { createInitialStagesForTournament } = require("./stage.service");
+const {
+  createInitialStagesForTournament,
+  deleteStagesByTournamentId,
+} = require("./stage.service");
 
 // tournament
 const createTournament = async (tournamentData) => {
   const {
     name,
     description,
-    tournament_type,
-    start_at,
-    created_at,
-    updated_at,
     category,
+    max_allowed_teams,
+    tournament_type,
+    tournament_format,
+    participants_per_group,
+    participants_advance,
+    final_stage_format,
+    ranked_by,
+    registration_deadline,
+    registration_type,
+    registration_fee,
+    payment_deadline,
+    prize_pool,
+    prize_1st,
+    prize_2nd,
+    prize_3rd,
+    prize_mvp,
+    start_at,
     company_id,
+    open_signup = true,
+    private: isPrivate = false,
+    poster_url,
   } = tournamentData;
 
   const client = await pool.connect();
@@ -19,31 +38,85 @@ const createTournament = async (tournamentData) => {
   try {
     await client.query("BEGIN");
 
-    // Insert tournament
     const tournamentResult = await client.query(
       `
       INSERT INTO tournaments (
-        name, description, tournament_type, start_at, created_at, updated_at, category, company_id
-      ) VALUES ($1, $2, $3, $4, NOW(), NOW(), $5, $6)
+        name,
+        description,
+        category,
+        max_allowed_teams,
+        tournament_type,
+        tournament_format,
+        participants_per_group,
+        participants_advance,
+        final_stage_format,
+        ranked_by,
+        registration_deadline,
+        registration_type,
+        registration_fee,
+        payment_deadline,
+        prize_pool,
+        prize_1st,
+        prize_2nd,
+        prize_3rd,
+        prize_mvp,
+        start_at,
+        company_id,
+        open_signup,
+        private,
+        poster_url,
+        created_at,
+        updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11, $12, $13, $14, $15,
+        $16, $17, $18, $19, $20, $21, $22, $23, $24,
+        NOW(), NOW()
+      )
       RETURNING *;
     `,
-      [name, description, tournament_type, start_at, category, company_id]
+      [
+        name,
+        description,
+        category,
+        Number(max_allowed_teams),
+        tournament_type,
+        tournament_format,
+        Number(participants_per_group),
+        Number(participants_advance),
+        final_stage_format,
+        ranked_by,
+        registration_deadline,
+        registration_type,
+        Number(registration_fee),
+        payment_deadline,
+        Number(prize_pool),
+        Number(prize_1st),
+        Number(prize_2nd),
+        Number(prize_3rd),
+        Number(prize_mvp),
+        start_at,
+        company_id,
+        open_signup,
+        isPrivate,
+        poster_url,
+      ]
     );
 
     const tournament = tournamentResult.rows[0];
 
-    // Call helper to create stages
-    // for now only round robin two stages
+    // Create stages based on tournament type
     await createInitialStagesForTournament(
       client,
       tournament.id,
-      tournament.tournament_type
+      tournament.tournament_format
     );
 
     await client.query("COMMIT");
     return tournament;
   } catch (err) {
     await client.query("ROLLBACK");
+    console.error("❌ Error creating tournament:", err);
     throw err;
   } finally {
     client.release();
@@ -52,7 +125,7 @@ const createTournament = async (tournamentData) => {
 
 const updateTournament = async (id, updateData) => {
   if (Object.keys(updateData).length === 0) {
-    throw new Error(`No Fields provided to update`);
+    throw new Error(`No fields provided to update`);
   }
 
   const fields = [];
@@ -98,10 +171,37 @@ const getTournamentById = async (id) => {
   return tournament.rows[0];
 };
 
+const deleteTournament = async (id) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // await deleteStagesByTournamentId(id, client);
+
+    const result = await client.query("DELETE FROM tournaments WHERE id = $1", [
+      id,
+    ]);
+
+    await client.query("COMMIT");
+
+    if (result.rowCount === 0) {
+      return { notFound: true };
+    }
+
+    return { success: true };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   createTournament,
   updateTournament,
   getAllTournaments,
   getTournamentById,
   getTournamentsByCompanyId,
+  deleteTournament,
 };

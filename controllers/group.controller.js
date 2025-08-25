@@ -49,6 +49,30 @@ exports.createGroupsWithParticipants = async (req, res) => {
   }
 };
 
+exports.updateGroupsController = async (req, res) => {
+  const { tournament_id, stage_id, groupsData } = req.body;
+
+  if (!tournament_id || !stage_id || !Array.isArray(groupsData)) {
+    return res.status(400).json({ message: "Missing or invalid data." });
+  }
+
+  try {
+    const updatedGroups = await groupService.updateGroupParticipants(
+      tournament_id,
+      stage_id,
+      groupsData
+    );
+
+    return res.status(200).json({
+      message: "Groups updated successfully.",
+      groups: updatedGroups,
+    });
+  } catch (err) {
+    console.error("Error updating groups:", err);
+    return res.status(500).json({ message: "Internal server error." });
+  }
+};
+
 // for generating matches after groups are confirmed
 exports.generateMatchesAfterGroupConfirmation = async (req, res) => {
   const { tournamentId, stageId } = req.body;
@@ -111,5 +135,22 @@ exports.getGroupStandings = async (req, res) => {
   } catch (err) {
     console.error("Error fetching standings by stage:", err.message);
     res.status(500).json({ error: "Failed to fetch standings" });
+  }
+};
+
+exports.updateGroup = async (req, res) => {
+  const { id } = req.params;
+  const groupData = req.body;
+
+  try {
+    const updatedGroups = await groupService.updateGroup(id, groupData);
+
+    return res.status(200).json({
+      message: "Group updated successfully.",
+      groups: updatedGroups,
+    });
+  } catch (err) {
+    console.error("Error updating groups:", err);
+    return res.status(500).json({ message: "Internal server error." });
   }
 };

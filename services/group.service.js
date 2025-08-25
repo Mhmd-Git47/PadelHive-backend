@@ -81,6 +81,71 @@ const createGroupsWithParticipants = async (
   }
 };
 
+// if need to update groups to another
+const updateGroupParticipants = async (tournamentId, stageId, groupsData) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    // 1. Delete group participants for groups in this stage
+    await client.query(
+      `
+      DELETE FROM group_participants 
+      WHERE group_id IN (
+        SELECT id FROM groups WHERE tournament_id = $1 AND stage_id = $2
+      );
+      `,
+      [tournamentId, stageId]
+    );
+
+    // 2. Delete the groups themselves
+    await client.query(
+      `
+      DELETE FROM groups 
+      WHERE tournament_id = $1 AND stage_id = $2;
+      `,
+      [tournamentId, stageId]
+    );
+
+    // 3. Re-insert the new groups and their participants
+    const createdGroups = [];
+    let i = 0;
+
+    for (const group of groupsData) {
+      const groupResult = await client.query(
+        `
+        INSERT INTO groups (tournament_id, name, group_index, created_at, updated_at, stage_id)
+        VALUES ($1, $2, $3, NOW(), NOW(), $4)
+        RETURNING *;
+        `,
+        [tournamentId, group.name, i, stageId]
+      );
+      const createdGroup = groupResult.rows[0];
+      createdGroups.push(createdGroup);
+      i++;
+
+      for (const pid of group.participantIds) {
+        await client.query(
+          `
+          INSERT INTO group_participants (group_id, participant_id)
+          VALUES ($1, $2);
+          `,
+          [createdGroup.id, pid]
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+    return createdGroups;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 // groups are generated previously, this function only generate matches and stages...
 const generateMatchesAfterGroupConfirmation = async (tournamentId, stageId) => {
   const client = await pool.connect();
@@ -289,4 +354,5 @@ module.exports = {
   getGroupStandings,
   updateGroup,
   generateMatchesAfterGroupConfirmation,
+  updateGroupParticipants,
 };

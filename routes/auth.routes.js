@@ -20,8 +20,9 @@ router.post("/register-admin", authController.registerAdm);
 router.post("/login-admin", authController.loginAdm);
 
 // user routes
-router.post("/register", upload.single("image"), authController.register);
+router.post("/register", upload.single("image_url"), authController.register);
 router.post("/login", authController.login);
+router.get("/users", authController.getUsers);
 router.get("/user/:id", authController.getUserById);
 router.put("/user/:id", upload.single("image"), authController.updateUser);
 router.delete("/user/:id", authController.deleteUser);

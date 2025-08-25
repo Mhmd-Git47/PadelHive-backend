@@ -4,6 +4,10 @@ const router = express.Router();
 const groupController = require("../controllers/group.controller");
 
 router.post("/create", groupController.createGroupsWithParticipants);
+router.post("/update", groupController.updateGroupsController);
+// this will update a specific group
+router.patch("/update/:id", groupController.updateGroup);
+
 router.post(
   "/generate-matches",
   groupController.generateMatchesAfterGroupConfirmation

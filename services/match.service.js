@@ -1,5 +1,8 @@
 const pool = require("../db");
-const { checkMatchesCompleted } = require("../helpers/match.helper");
+const {
+  checkMatchesCompleted,
+  updateEloForDoublesMatch,
+} = require("../helpers/match.helper");
 const { generateRoundRobin } = require("../helpers/roundRobin");
 const groupService = require("./group.service");
 const stageService = require("./stage.service");
@@ -44,7 +47,7 @@ const updateMatch = async (id, updatedData) => {
   const client = await pool.connect();
 
   if (Object.keys(updatedData).length === 0) {
-    throw new Error(`No Fields provided to update`);
+    throw new Error(`No fields provided to update`);
   }
 
   const fields = [];
@@ -65,43 +68,56 @@ const updateMatch = async (id, updatedData) => {
 
   try {
     await client.query("BEGIN");
+    console.log("Running update query:", updateQuery);
+    console.log("With values:", values);
 
     // Update the match
     const result = await client.query(updateQuery, values);
     const updatedMatch = result.rows[0];
+    if (!updatedMatch) {
+      throw new Error(`No match found with id ${id} to update`);
+    }
+    console.log("Match updated successfully:", updatedMatch);
 
-    // if group stage so if group_id != null
+    if (updatedMatch.state === "completed" && updatedMatch.winner_id) {
+      console.log("Match completed, updating Elo ratings...");
+      await updateEloForDoublesMatch(updatedMatch, client);
+      console.log("Elo ratings updated.");
+    }
+
     if (updatedMatch.group_id !== null) {
-      // Check if all matches in the group are completed
+      console.log("Match is in group stage, checking group completion...");
       if (updatedMatch.group_id) {
-        const groupMatches = await client.query(
+        const groupMatchesRes = await client.query(
           `SELECT * FROM matches WHERE group_id = $1 ORDER BY round, id`,
           [updatedMatch.group_id]
         );
-
-        const allCompleted = groupMatches.rows.every(
-          (m) => m.state === "completed"
+        const groupMatches = groupMatchesRes.rows;
+        console.log(
+          `Found ${groupMatches.length} matches in group ${updatedMatch.group_id}`
         );
 
+        const allCompleted = groupMatches.every((m) => m.state === "completed");
+        console.log("All group matches completed?", allCompleted);
+
         if (allCompleted) {
-          // 1. Mark group as completed
+          console.log(
+            "All matches completed in group, updating group state..."
+          );
           await groupService.updateGroup(
             updatedMatch.group_id,
-            {
-              state: "completed",
-              completed_at: new Date(),
-            },
+            { state: "completed", completed_at: new Date() },
             client
           );
+          console.log("Group marked as completed.");
 
-          // 2. Calculate group standings
+          // Calculate group standings
           const participantStats = {};
-
-          groupMatches.rows.forEach((match) => {
+          groupMatches.forEach((match) => {
             const { player1_id, player2_id, winner_id, scores_csv } = match;
             if (!player1_id || !player2_id || !winner_id) return;
 
-            for (const pid of [player1_id, player2_id]) {
+            [player1_id, player2_id].forEach((pid) => {
               if (!participantStats[pid]) {
                 participantStats[pid] = {
                   participant_id: pid,
@@ -111,14 +127,13 @@ const updateMatch = async (id, updatedData) => {
                   matchesPlayed: 0,
                 };
               }
-            }
+            });
 
             participantStats[winner_id].wins += 1;
-
             participantStats[player1_id].matchesPlayed += 1;
             participantStats[player2_id].matchesPlayed += 1;
 
-            const sets = scores_csv?.split(",") || [];
+            const sets = scores_csv ? scores_csv.split(",") : [];
             sets.forEach((set) => {
               const [p1Score, p2Score] = set.trim().split("-").map(Number);
               if (!isNaN(p1Score) && !isNaN(p2Score)) {
@@ -142,17 +157,30 @@ const updateMatch = async (id, updatedData) => {
             return b.pointsFor - a.pointsFor;
           });
 
-          const qualifiedTeams = ranked.slice(0, 2); // top 2
+          console.log("Ranked participants:", ranked);
 
-          // 3. Determine group letter (A, B, C...)
+          const tournamentRes = await client.query(
+            `SELECT participants_advance FROM tournaments WHERE id = $1`,
+            [updatedMatch.tournament_id]
+          );
+
+          const tournament = tournamentRes.rows[0];
+
+          const numAdvanced = tournament.participants_advance;
+          const qualifiedTeams = ranked.slice(0, numAdvanced);
+          console.log("Qualified teams:", qualifiedTeams);
+
           const groupRes = await client.query(
             `SELECT * FROM groups WHERE id = $1`,
             [updatedMatch.group_id]
           );
           const group = groupRes.rows[0];
-          const groupLetter = String.fromCharCode(65 + group.group_index); // A, B, C...
+          if (!group) {
+            throw new Error(`Group with id ${updatedMatch.group_id} not found`);
+          }
+          const groupLetter = String.fromCharCode(65 + group.group_index);
+          console.log("Group letter:", groupLetter);
 
-          // 4. Get final stage ID
           const finalStageRes = await client.query(
             `SELECT id FROM stages WHERE tournament_id = $1 AND name = 'Final Stage' LIMIT 1`,
             [updatedMatch.tournament_id]
@@ -161,7 +189,6 @@ const updateMatch = async (id, updatedData) => {
           console.log(`Final Stage ID: ${finalStageId}`);
           if (!finalStageId) throw new Error("Final stage not found");
 
-          // 5. Get all final stage participants to map label => ID
           const spRes = await client.query(
             `SELECT id, participant_label FROM stage_participants WHERE stage_id = $1`,
             [finalStageId]
@@ -170,38 +197,39 @@ const updateMatch = async (id, updatedData) => {
           for (const row of spRes.rows) {
             labelToId[row.participant_label] = row.id;
           }
+          console.log("Stage participants label to ID map:", labelToId);
 
-          // 6. Update stage_participants with qualified teams
           for (let i = 0; i < qualifiedTeams.length; i++) {
-            const label = `${groupLetter}${i + 1}`; // A1, A2...
+            const label = `${groupLetter}${i + 1}`;
             const spId = labelToId[label];
             if (!spId) {
               console.warn(`No stage_participant found for label ${label}`);
               continue;
             }
 
+            console.log(
+              `Updating stage_participant ${spId} with participant ${qualifiedTeams[i].participant_id}`
+            );
             await stageService.updateStageParticipant(spId, {
               participant_id: qualifiedTeams[i].participant_id,
             });
           }
+          console.log("Stage participants updated.");
         }
       }
-    }
-
-    // If not a group stage match (can be final stage)
-    else {
+    } else {
+      // 🏆 Final Stage (group_id is null)
       if (updatedMatch.state === "completed") {
         const matchRes = await client.query(
           `SELECT * FROM matches WHERE player1_prereq_match_id = $1 OR player2_prereq_match_id = $1`,
           [updatedMatch.id]
         );
 
-        const match = matchRes.rows[0];
+        const nextMatch = matchRes.rows[0];
+        console.log("Next match based on prereq:", nextMatch);
 
-        if (match) {
-          // Determine the winner's stage player ID
+        if (nextMatch) {
           let winnerStagePlayerId = null;
-
           if (updatedMatch.winner_id === updatedMatch.player1_id) {
             winnerStagePlayerId = updatedMatch.stage_player1_id;
           } else if (updatedMatch.winner_id === updatedMatch.player2_id) {
@@ -212,38 +240,63 @@ const updateMatch = async (id, updatedData) => {
             throw new Error("Could not determine winner's stage player ID");
           }
 
-          // Update the next match depending on prereq position
-          if (updatedMatch.id === match.player1_prereq_match_id) {
-            const updatedMatchPreReqRes = await client.query(
+          if (updatedMatch.id === nextMatch.player1_prereq_match_id) {
+            const updatedNextMatchRes = await client.query(
               `UPDATE matches SET player1_id = $1, stage_player1_id = $2 WHERE id = $3 RETURNING *`,
-              [updatedMatch.winner_id, winnerStagePlayerId, match.id]
+              [updatedMatch.winner_id, winnerStagePlayerId, nextMatch.id]
             );
             console.log(
-              "✅ Updated match (player1):",
-              updatedMatchPreReqRes.rows[0]
+              "✅ Updated next match (player1):",
+              updatedNextMatchRes.rows[0]
             );
-          } else if (updatedMatch.id === match.player2_prereq_match_id) {
-            const updatedMatchPreReqRes = await client.query(
+          } else if (updatedMatch.id === nextMatch.player2_prereq_match_id) {
+            const updatedNextMatchRes = await client.query(
               `UPDATE matches SET player2_id = $1, stage_player2_id = $2 WHERE id = $3 RETURNING *`,
-              [updatedMatch.winner_id, winnerStagePlayerId, match.id]
+              [updatedMatch.winner_id, winnerStagePlayerId, nextMatch.id]
             );
             console.log(
-              "✅ Updated match (player2):",
-              updatedMatchPreReqRes.rows[0]
+              "✅ Updated next match (player2):",
+              updatedNextMatchRes.rows[0]
             );
           }
         } else {
           console.log(
-            "ℹ️ No match found for prereq match ID:",
+            "ℹ️ No next match found for prereq match ID:",
             updatedMatch.id
+          );
+        }
+
+        const stageMatchesRes = await client.query(
+          `SELECT * FROM matches WHERE stage_id = $1`,
+          [updatedMatch.stage_id]
+        );
+
+        const stageMatches = stageMatchesRes.rows;
+
+        const allStageCompleted = stageMatches.every(
+          (m) => m.state === "completed"
+        );
+
+        // if all matches have completed state, update stage and tournament to have completed state
+        if (allStageCompleted) {
+          await client.query(
+            `UPDATE stages SET state = 'completed', completed_at = NOW() WHERE id = $1`,
+            [updatedMatch.stage_id]
+          );
+
+          await client.query(
+            `UPDATE tournaments SET state = 'completed', completed_at = NOW() WHERE id = $1`,
+            [updatedMatch.tournament_id]
           );
         }
       }
     }
+
     await client.query("COMMIT");
     return updatedMatch;
   } catch (err) {
     await client.query("ROLLBACK");
+    console.error("Error in updateMatch:", err);
     throw err;
   } finally {
     client.release();

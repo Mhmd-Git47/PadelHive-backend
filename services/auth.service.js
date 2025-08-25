@@ -101,8 +101,11 @@ const registerUser = async ({
   date_of_birth,
   gender,
   address,
-  image,
+  image_url,
   password,
+  category,
+  elo_rate,
+  display_name,
 }) => {
   // 1. Check if email already registered
   const existing = await pool.query("SELECT * FROM users WHERE email = $1", [
@@ -125,8 +128,11 @@ const registerUser = async ({
       date_of_birth,
       gender,
       address,
-      image,
+      image_url,
       hashedPassword,
+      category,
+      elo_rate,
+      display_name,
     },
     process.env.JWT_SECRET,
     { expiresIn: "1h" }
@@ -169,6 +175,7 @@ const loginUser = async ({ email, password }) => {
       id: user.id,
       first_name: user.first_name,
       last_name: user.last_name,
+      display_name: user.display_name,
       email: user.email,
       phone_number: user.phone_number,
     },
@@ -193,8 +200,8 @@ const verifyAndInsertUser = async (token) => {
   const result = await pool.query(
     `INSERT INTO users (
       first_name, last_name, email, phone_number, nationality,
-      date_of_birth, gender, address, image_url, password
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, email`,
+      date_of_birth, gender, address, image_url, password, elo_rate, category, display_name
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, $11, $12, $13) RETURNING id, email`,
     [
       userData.first_name,
       userData.last_name,
@@ -206,10 +213,20 @@ const verifyAndInsertUser = async (token) => {
       userData.address,
       userData.image_url,
       userData.hashedPassword,
+      userData.elo_rate ?? 1000,
+      userData.category ?? "D",
+      userData.display_name,
     ]
   );
 
   return result.rows[0];
+};
+
+const getUsers = async () => {
+  const result =
+    await pool.query(`SELECT id, email, first_name, last_name, date_of_birth, gender, image_url, phone_number, nationality, address, created_at, updated_at, elo_rate, user_status, display_name, category 
+     FROM users`);
+  return result.rows;
 };
 
 const getUserById = async (userId) => {
@@ -350,4 +367,5 @@ module.exports = {
   updateUser,
   lookupUser,
   deleteUser,
+  getUsers,
 };

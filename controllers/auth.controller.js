@@ -31,11 +31,14 @@ exports.register = async (req, res) => {
       nationality,
       date_of_birth,
       gender,
-      password,
       address,
+      password,
+      category,
+      elo_rate,
+      display_name,
     } = req.body;
 
-    const image = req.file ? req.file.filename : null;
+    const image_url = req.file ? req.file.filename : null;
 
     const user = await authService.registerUser({
       first_name,
@@ -45,9 +48,12 @@ exports.register = async (req, res) => {
       nationality,
       date_of_birth,
       gender,
-      password,
       address,
-      image,
+      image_url,
+      password,
+      category,
+      elo_rate,
+      display_name,
     });
 
     res.status(201).json({ message: "User registered", user });
@@ -75,6 +81,15 @@ exports.verifyEmail = async (req, res) => {
       .json({ message: "Email verified and user registered", user: result });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+};
+
+exports.getUsers = async (req, res) => {
+  try {
+    const result = await authService.getUsers();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: "Failed fetching users." });
   }
 };
 

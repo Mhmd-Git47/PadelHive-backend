@@ -13,8 +13,8 @@ const groupRoutes = require("./routes/group.routes");
 const stageRoutes = require("./routes/stage.routes");
 const paymentsRoutes = require("./routes/payments.routes");
 const companyRoutes = require("./routes/company.routes");
-
-const pool = require("./db");
+const sponsorRoutes = require("./routes/sponsor.routes");
+const reportRoutes = require("./routes/report.routes");
 
 require("dotenv").config();
 
@@ -36,9 +36,13 @@ app.use("/groups", groupRoutes);
 app.use("/stages", stageRoutes);
 app.use("/payments", paymentsRoutes);
 app.use("/company", companyRoutes);
+app.use("/sponsors", sponsorRoutes);
+app.use("/reports", reportRoutes);
 
 // get images
 app.use("/images/users", express.static("images/users"));
+app.use("/images/tournaments", express.static("images/tournaments"));
+app.use("/images/sponsors", express.static("images/sponsors"));
 
 // backend integration
 app.use("/api/participants", participantsRouter);
@@ -64,17 +68,6 @@ app.use("/api/admin", adminRoutes);
 // app.use("/api/matches", matchesRoutes);
 // app.use("/api/groups", groupRoutes);
 // app.use("/api/stages", stageRoutes);
-
-app.get("/test-db", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT NOW()");
-    console.log("✅ /test-db query result:", result.rows[0]);
-    res.send(`Database time: ${result.rows[0].now}`);
-  } catch (error) {
-    console.error("❌ /test-db error:", error.message);
-    res.status(500).send("Database connection failed");
-  }
-});
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
