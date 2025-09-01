@@ -225,6 +225,7 @@ const getGroupStandings = async (tournamentId) => {
       history: [],
       match_diffs: 0,
       groupId,
+      is_disqualified: p.is_disqualified,
     };
   });
 

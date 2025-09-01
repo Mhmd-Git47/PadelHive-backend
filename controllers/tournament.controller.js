@@ -122,3 +122,29 @@ exports.deleteTournament = async (req, res) => {
     res.status(500).json({ error: "failed deleting tournament" });
   }
 };
+
+exports.getTournamentsByUserId = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const results = await tournamentService.getTournamentsByUserId(userId);
+    res.json(results);
+  } catch (err) {
+    console.error("Failed fetching tournaments: ", err);
+    res.status(500).json({ error: "failed fetching tournaments" });
+  }
+};
+
+exports.checkUserRegisteredToTournament = async (req, res) => {
+  try {
+    const { userId, tournamentId } = req.params;
+    const isRegistered = await tournamentService.isUserRegisteredToTournament(
+      userId,
+      tournamentId
+    );
+
+    res.json({ isRegistered });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};

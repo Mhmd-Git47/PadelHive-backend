@@ -63,6 +63,7 @@ exports.register = async (req, res) => {
   }
 };
 
+// users
 exports.login = async (req, res) => {
   try {
     const result = await authService.loginUser(req.body);
@@ -158,5 +159,25 @@ exports.deleteUser = async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: "Error deleting user" });
+  }
+};
+
+exports.forgotPasswordOtp = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const result = await authService.forgotPasswordOtp(email);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
+exports.resetPasswordOtp = async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+    const result = await authService.resetPasswordWithOtp({ email, otp, newPassword });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 };

@@ -1,10 +1,11 @@
-const { sendVerificationEmail } = require("./email.service");
+const { sendVerificationEmail, sendEmail } = require("./email.service");
 
 const pool = require("../db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 
 const registerAdmin = async ({
   username,
@@ -91,7 +92,6 @@ const updateAdmin = async (id, updatedData, clientt) => {
 };
 
 // user
-
 const registerUser = async ({
   first_name,
   last_name,
@@ -111,8 +111,16 @@ const registerUser = async ({
   const existing = await pool.query("SELECT * FROM users WHERE email = $1", [
     email,
   ]);
+
+  const existingDisplayName = await pool.query(
+    "SELECT * FROM users WHERE display_name = $1",
+    [display_name]
+  );
   if (existing.rows.length > 0) {
     throw new Error("Email already registered");
+  }
+  if (existingDisplayName.rows.length > 0) {
+    throw new Error("Display Name already registered");
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
@@ -343,7 +351,7 @@ const updateUser = async (userId, userData) => {
 const lookupUser = async (identifier) => {
   const result = await pool.query(
     `
-      SELECT id, email, display_name FROM users WHERE email = $1 OR display_name = $1 LIMIT 1
+      SELECT id, email, display_name, elo_rate FROM users WHERE email = $1 OR display_name = $1 LIMIT 1
     `,
     [identifier]
   );
@@ -354,6 +362,98 @@ const lookupUser = async (identifier) => {
 const deleteUser = async (userId) => {
   const result = await pool.query(`DELETE FROM users WHERE id = $1`, [userId]);
   return result.rowCount > 0;
+};
+
+const forgotPasswordOtp = async (email) => {
+  const MAX_OTP_PER_HOUR = 2;
+  const WAIT_TIME_MINUTES = 10;
+
+  // 1️⃣ Fetch user
+  const result = await pool.query("SELECT * FROM users WHERE email = $1", [
+    email,
+  ]);
+  const user = result.rows[0];
+  if (!user) throw new Error("User not found");
+
+  const now = new Date();
+  const lastSent = user.otp_last_sent;
+  const count = user.otp_send_count || 0;
+
+  // 2️⃣ Check rate limit
+  if (lastSent) {
+    const diffMinutes = (now - new Date(lastSent)) / (1000 * 60);
+    if (diffMinutes < WAIT_TIME_MINUTES && count >= MAX_OTP_PER_HOUR) {
+      throw new Error(
+        `Please wait ${WAIT_TIME_MINUTES} minutes before requesting another OTP.`
+      );
+    } else if (diffMinutes >= WAIT_TIME_MINUTES) {
+      // Reset counter after waiting period
+      await pool.query("UPDATE users SET otp_send_count=0 WHERE id=$1", [
+        user.id,
+      ]);
+    }
+  }
+
+  // 3️⃣ Generate 4-digit OTP
+  const otp = Math.floor(1000 + Math.random() * 9000).toString();
+  const expiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+  // 4️⃣ Update user with OTP and count
+  await pool.query(
+    "UPDATE users SET reset_otp=$1, reset_otp_expiry=$2, otp_last_sent=NOW(), otp_send_count=otp_send_count+1 WHERE id=$3",
+    [otp, expiry, user.id]
+  );
+
+  // 5️⃣ Prepare modern HTML email
+  const html = `
+    <div style="font-family: Arial, sans-serif; background-color:#f4f6f8; padding:30px 0; display:flex; justify-content:center;">
+      <div style="background-color:#fff; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.1); width:100%; max-width:400px; padding:30px; text-align:center;">
+        <div style="margin-bottom:20px;">
+          <img src='https://yourdomain.com/assets/logo.png' alt='Logo' width='80'/>
+        </div>
+        <h2 style="font-size:22px; margin-bottom:10px; color:#333;">Password Reset OTP</h2>
+        <p style="font-size:16px; color:#555; margin-bottom:30px;">
+          Use the following OTP to reset your password. It is valid for 10 minutes.
+        </p>
+        <div style="font-size:28px; font-weight:bold; letter-spacing:6px; background-color:#f1f5f9; padding:15px 0; border-radius:8px; margin-bottom:30px; color:#C5FF3E;">
+          ${otp}
+        </div>
+        <p style="font-size:14px; color:#777;">If you didn't request a password reset, please ignore this email.</p>
+      </div>
+    </div>
+  `;
+
+  // 6️⃣ Send OTP email
+  await sendEmail({
+    to: email,
+    subject: "Your Password Reset OTP",
+    html,
+    text: `Your OTP is ${otp}`,
+  });
+
+  return { message: "OTP sent to your email." };
+};
+
+const resetPasswordWithOtp = async ({ email, otp, newPassword }) => {
+  const result = await pool.query("SELECT * FROM users WHERE email = $1", [
+    email,
+  ]);
+  const user = result.rows[0];
+  if (!user) throw new Error("User not found");
+
+  if (!user.reset_otp || user.reset_otp !== otp) throw new Error("Invalid OTP");
+
+  if (new Date(user.reset_otp_expiry) < new Date())
+    throw new Error("OTP expired");
+
+  const hashed = await bcrypt.hash(newPassword, 10);
+
+  await pool.query(
+    "UPDATE users SET password = $1, reset_otp = NULL, reset_otp_expiry = NULL WHERE id = $2",
+    [hashed, user.id]
+  );
+
+  return { message: "Password reset successful" };
 };
 
 module.exports = {
@@ -368,4 +468,6 @@ module.exports = {
   lookupUser,
   deleteUser,
   getUsers,
+  forgotPasswordOtp,
+  resetPasswordWithOtp,
 };

@@ -87,3 +87,16 @@ exports.generateMatchesForGroupStage = async (req, res) => {
     res.status(500).json({ error: "Failed to generate group matches" });
   }
 };
+
+exports.getMatchesByUserId = async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const matches = await matchService.getMatchesByUserId(userId);
+
+    res.status(200).json(matches);
+  } catch (err) {
+    console.error("Error fetching matches: ", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+};

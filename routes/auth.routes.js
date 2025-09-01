@@ -28,6 +28,8 @@ router.put("/user/:id", upload.single("image"), authController.updateUser);
 router.delete("/user/:id", authController.deleteUser);
 // GET /users/lookup?identifier=some@email.com
 router.get("/lookup", authController.lookupUser);
+router.post("/forgot-password-otp", authController.forgotPasswordOtp);
+router.post("/reset-password-otp", authController.resetPasswordOtp);
 
 // verification email
 router.get("/verify-email", authController.verifyEmail);

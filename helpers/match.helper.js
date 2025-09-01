@@ -49,108 +49,146 @@ function getKFactor(roundName) {
 }
 
 async function updateEloForDoublesMatch(match, client) {
-  // Fetch all 4 users from participants (assuming participant has padelhive_user1_id and padelhive_user2_id)
-  // You must adapt this fetching depending on how you get the users from match participants
-
-  // Example fetching user data by participant_id, you may have a helper function for this
-  const getUserByParticipantId = async (participantId) => {
+  // Helper to safely fetch user by participant ID
+  const fetchUserSafe = async (participantId) => {
+    if (!participantId) return null; // skip null participant
     const res = await client.query(
       `SELECT id, elo_rate FROM users WHERE id = $1`,
       [participantId]
     );
-    if (res.rows.length === 0) {
-      throw new Error(`User not found for participant_id ${participantId}`);
-    }
-    return res.rows[0];
+    return res.rows[0] || null;
   };
 
-  // Get participants for player1 and player2
-  const participant1 = await client.query(
+  // Fetch participants for player1 and player2
+  const participant1Res = await client.query(
     `SELECT padelhive_user1_id, padelhive_user2_id FROM participants WHERE id = $1`,
     [match.player1_id]
   );
-  const participant2 = await client.query(
+  const participant2Res = await client.query(
     `SELECT padelhive_user1_id, padelhive_user2_id FROM participants WHERE id = $1`,
     [match.player2_id]
   );
 
-  if (participant1.rows.length === 0 || participant2.rows.length === 0) {
-    throw new Error(
-      `Participant not found for player1_id: ${match.player1_id} or player2_id: ${match.player2_id}`
+  const p1 = participant1Res.rows[0];
+  const p2 = participant2Res.rows[0];
+
+  if (!p1 || !p2) {
+    console.warn(
+      `Participant record missing for player1_id: ${match.player1_id} or player2_id: ${match.player2_id}`
     );
+    return; // skip Elo update if participant missing
   }
 
-  const p1 = participant1.rows[0];
-  const p2 = participant2.rows[0];
+  // Fetch users safely
+  const users = await Promise.all([
+    fetchUserSafe(p1.padelhive_user1_id),
+    fetchUserSafe(p1.padelhive_user2_id),
+    fetchUserSafe(p2.padelhive_user1_id),
+    fetchUserSafe(p2.padelhive_user2_id),
+  ]);
 
-  // Fetch the users
-  const user1Team1 = await getUserByParticipantId(p1.padelhive_user1_id);
-  const user2Team1 = await getUserByParticipantId(p1.padelhive_user2_id);
-  const user1Team2 = await getUserByParticipantId(p2.padelhive_user1_id);
-  const user2Team2 = await getUserByParticipantId(p2.padelhive_user2_id);
+  // Separate into teams and remove nulls
+  const team1Users = users.slice(0, 2).filter(Boolean);
+  const team2Users = users.slice(2, 4).filter(Boolean);
 
-  // Validate and fallback elo_rate if invalid
-  [user1Team1, user2Team1, user1Team2, user2Team2].forEach((user) => {
-    let parsedElo = Number(user.elo_rate);
-    if (isNaN(parsedElo) || parsedElo <= 0) {
-      // parsedElo = DEFAULT_ELO;
-      console.log(parsedElo);
-    }
-    user.elo_rate = parsedElo;
-  });
+  if (team1Users.length === 0 || team2Users.length === 0) {
+    console.warn(
+      "Not enough valid users to calculate Elo. Skipping Elo update."
+    );
+    return;
+  }
 
-  // Calculate average Elo for each team
-  const team1Elo = (user1Team1.elo_rate + user2Team1.elo_rate) / 2;
-  const team2Elo = (user1Team2.elo_rate + user2Team2.elo_rate) / 2;
+  // Parse Elo safely and fallback to 1000 if invalid
+  const parseElo = (user) => {
+    const val = Number(user.elo_rate);
+    return isNaN(val) || val <= 0 ? 900 : val;
+  };
 
+  const team1Elo =
+    team1Users.reduce((sum, u) => sum + parseElo(u), 0) / team1Users.length;
+  const team2Elo =
+    team2Users.reduce((sum, u) => sum + parseElo(u), 0) / team2Users.length;
+
+  // Calculate match stats (existing helper)
   const { margin, dominance } = getMatchStats(
     match.scores_csv,
     match.winner_id,
     match.player1_id
   );
-  // Calculate K factor (adjust as per your rules)
-  const baseK = getKFactor(match.round_name);
 
+  // K factor based on round
+  const baseK = getKFactor(match.round_name);
   const dominanceMultiplier = dominanceToMultiplier(dominance, {
     impact: 0.5,
     maxMultiplier: 1.75,
   });
-
   const K = baseK * dominanceMultiplier;
 
+  // Determine winning team
   const team1Win = Number(match.winner_id) === Number(match.player1_id) ? 1 : 0;
 
   // Expected scores
   const expectedTeam1 = 1 / (1 + Math.pow(10, (team2Elo - team1Elo) / 400));
   const expectedTeam2 = 1 - expectedTeam1;
 
-  // Calculate new Elo ratings
-  const newEloTeam1User1 = user1Team1.elo_rate + K * (team1Win - expectedTeam1);
-  const newEloTeam1User2 = user2Team1.elo_rate + K * (team1Win - expectedTeam1);
-  const newEloTeam2User1 =
-    user1Team2.elo_rate + K * (1 - team1Win - expectedTeam2);
-  const newEloTeam2User2 =
-    user2Team2.elo_rate + K * (1 - team1Win - expectedTeam2);
+  // Update Elo for team1
+  await Promise.all(
+    team1Users.map((user) => {
+      const newElo = parseElo(user) + K * (team1Win - expectedTeam1);
+      const newCategory = getCategoryByElo(newElo);
+      return client.query(
+        `UPDATE users SET elo_rate = $1, category = $2 WHERE id = $3`,
+        [newElo, newCategory, user.id]
+      );
+    })
+  );
 
-  // Update users' Elo ratings in DB
-  await Promise.all([
-    client.query(`UPDATE users SET elo_rate = $1 WHERE id = $2`, [
-      newEloTeam1User1,
-      user1Team1.id,
-    ]),
-    client.query(`UPDATE users SET elo_rate = $1 WHERE id = $2`, [
-      newEloTeam1User2,
-      user2Team1.id,
-    ]),
-    client.query(`UPDATE users SET elo_rate = $1 WHERE id = $2`, [
-      newEloTeam2User1,
-      user1Team2.id,
-    ]),
-    client.query(`UPDATE users SET elo_rate = $1 WHERE id = $2`, [
-      newEloTeam2User2,
-      user2Team2.id,
-    ]),
-  ]);
+  // Update Elo for team2
+  await Promise.all(
+    team2Users.map((user) => {
+      const newElo = parseElo(user) + K * (1 - team1Win - expectedTeam2);
+      const newCategory = getCategoryByElo(newElo);
+      return client.query(
+        `UPDATE users SET elo_rate = $1, category = $2 WHERE id = $3`,
+        [newElo, newCategory, user.id]
+      );
+    })
+  );
+
+  console.log(
+    `Elo updated: Team1 [${team1Users.map(
+      (u) => u.id
+    )}] Team2 [${team2Users.map((u) => u.id)}]`
+  );
+}
+
+function getCategoryByElo(eloRate) {
+  let category;
+  let baseElo;
+
+  if (eloRate < 1050) {
+    category = "D";
+    baseElo = 900;
+  } else if (eloRate < 1200) {
+    category = "C";
+    baseElo = 1050;
+  } else if (eloRate < 1350) {
+    category = "B";
+    baseElo = 1200;
+  } else if (eloRate < 1500) {
+    category = "A";
+    baseElo = 1350;
+  } else {
+    return "A+"; 
+  }
+
+  const diff = eloRate - baseElo;
+
+  if (diff < 50) category += "-";
+  else if (diff < 100) category += "";
+  else category += "+";
+
+  return category;
 }
 
 function parseScores(scoresCsv) {
@@ -218,8 +256,69 @@ function dominanceToMultiplier(
   return Math.min(multiplier, maxMultiplier);
 }
 
+function updateMatchHelper(matchId, updatedData) {
+  const matchService = require("../services/match.service");
+  return matchService.updateMatch(matchId, updatedData);
+}
+
+// user_match_history table
+async function addMatchToUserHistory(match, client) {
+  const resolveParticipant = async (playerId, stagePlayerId) => {
+    if (playerId) return playerId;
+    if (stagePlayerId) {
+      const { rows } = await client.query(
+        "SELECT participant_id FROM stage_participants WHERE id = $1",
+        [stagePlayerId]
+      );
+      return rows[0]?.participant_id || null;
+    }
+    return null;
+  };
+
+  const p1 = await resolveParticipant(match.player1_id, match.stage_player1_id);
+  const p2 = await resolveParticipant(match.player2_id, match.stage_player2_id);
+
+  const insertHistory = async (participantId, didWin) => {
+    if (!participantId) return;
+    const {
+      rows: [participant],
+    } = await client.query(
+      "SELECT user_id, padelhive_user1_id, padelhive_user2_id FROM participants WHERE id = $1",
+      [participantId]
+    );
+
+    const userIds = [
+      participant.user_id,
+      participant.padelhive_user1_id,
+      participant.padelhive_user2_id,
+    ].filter(Boolean);
+
+    for (const uid of userIds) {
+      await client.query(
+        `INSERT INTO user_match_history (user_id, match_id, participant_id, tournament_id, did_win, played_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          uid,
+          match.id,
+          participantId,
+          match.tournament_id,
+          didWin,
+          match.completed_at,
+        ]
+      );
+      console.log(
+        `✅ Inserted match history for user ${uid}, match ${match.id}`
+      );
+    }
+  };
+  await insertHistory(p1, match.winner_id === p1);
+  await insertHistory(p2, match.winner_id === p2);
+  console.log("✅ Match history recorded.");
+}
+
 module.exports = {
   checkMatchesCompleted,
   generateMatchesForStages,
   updateEloForDoublesMatch,
+  updateMatchHelper,
+  addMatchToUserHistory,
 };

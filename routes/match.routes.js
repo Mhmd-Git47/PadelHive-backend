@@ -14,6 +14,8 @@ router.post(
 );
 router.get("/stage/:stageId", matchesController.getMatchByStageId);
 router.get("/", matchesController.getMatchesByTournamentId);
+router.get("/user/:userId", matchesController.getMatchesByUserId);
+router.get("/:id", matchesController.getMatchById);
 
 module.exports = router;
 

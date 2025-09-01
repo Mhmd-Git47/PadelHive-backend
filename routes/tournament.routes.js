@@ -6,7 +6,7 @@ const {
   authenticateToken,
   authorizeAdmin,
   authorizeSuperAdmin,
-  checkTournamentOwnership, 
+  checkTournamentOwnership,
 } = require("../middleware/auth.middleware");
 
 // Multer storage config
@@ -33,6 +33,13 @@ router.get("/:id", tournamentController.getTournamentById);
 router.get(
   "/company/:companyId",
   tournamentController.getTournamentsByCompanyId
+);
+
+// user tournaments history
+router.get("/user/:userId", tournamentController.getTournamentsByUserId);
+router.get(
+  "/:tournamentId/users/:userId/registered",
+  tournamentController.checkUserRegisteredToTournament
 );
 
 /**

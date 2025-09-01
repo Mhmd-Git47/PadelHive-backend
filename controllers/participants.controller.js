@@ -50,6 +50,21 @@ exports.getParticipantById = async (req, res) => {
   }
 };
 
+exports.disqualifyParticipant = async (req, res) => {
+  try {
+    const { tournamentId } = req.query;
+    const { id } = req.params;
+    const participant = await participantService.disqualifyParticipant(
+      tournamentId,
+      id
+    );
+    res.json(participant);
+  } catch (err) {
+    console.error("Error disqualifying participant: ", err.message);
+    res.status(500).json({ error: "Failed to disqualify participant" });
+  }
+};
+
 exports.getParticipantsByTournamentId = async (req, res) => {
   try {
     const { tournament_id } = req.query;

@@ -4,6 +4,8 @@ const {
   deleteStagesByTournamentId,
 } = require("./stage.service");
 
+const tournamentHelper = require("../helpers/tournament.helper");
+
 // tournament
 const createTournament = async (tournamentData) => {
   const {
@@ -28,15 +30,23 @@ const createTournament = async (tournamentData) => {
     prize_mvp,
     start_at,
     company_id,
-    open_signup = true,
+    open_registration = true,
     private: isPrivate = false,
     poster_url,
   } = tournamentData;
 
   const client = await pool.connect();
 
+  // Helper to safely convert values to integers or null
+  const toInt = (val) => (val != null ? Number(val) : null);
+
   try {
     await client.query("BEGIN");
+
+    // Get Elo rate from category; may return null
+    const eloRate =
+      (await tournamentHelper.getEloRateForTournament({ category })) ?? null;
+    console.log("Elo Rate: ", eloRate);
 
     const tournamentResult = await client.query(
       `
@@ -62,16 +72,18 @@ const createTournament = async (tournamentData) => {
         prize_mvp,
         start_at,
         company_id,
-        open_signup,
+        open_registration,
         private,
         poster_url,
         created_at,
-        updated_at
+        updated_at,
+        max_allowed_elo_rate,
+        state
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8,
         $9, $10, $11, $12, $13, $14, $15,
         $16, $17, $18, $19, $20, $21, $22, $23, $24,
-        NOW(), NOW()
+        NOW(), NOW(), $25, $26
       )
       RETURNING *;
     `,
@@ -79,27 +91,29 @@ const createTournament = async (tournamentData) => {
         name,
         description,
         category,
-        Number(max_allowed_teams),
+        toInt(max_allowed_teams),
         tournament_type,
         tournament_format,
-        Number(participants_per_group),
-        Number(participants_advance),
+        toInt(participants_per_group),
+        toInt(participants_advance),
         final_stage_format,
         ranked_by,
         registration_deadline,
         registration_type,
-        Number(registration_fee),
+        toInt(registration_fee),
         payment_deadline,
-        Number(prize_pool),
-        Number(prize_1st),
-        Number(prize_2nd),
-        Number(prize_3rd),
-        Number(prize_mvp),
+        toInt(prize_pool),
+        toInt(prize_1st),
+        toInt(prize_2nd),
+        toInt(prize_3rd),
+        toInt(prize_mvp),
         start_at,
         company_id,
-        open_signup,
+        open_registration,
         isPrivate,
         poster_url,
+        eloRate,
+        'pending'
       ]
     );
 
@@ -197,6 +211,30 @@ const deleteTournament = async (id) => {
   }
 };
 
+// user_tournaments_history
+const getTournamentsByUserId = async (userId) => {
+  const tournaments = await pool.query(
+    `
+    SELECT * FROM user_tournaments_history WHERE user_id = $1 ORDER BY registered_at DESC
+  `,
+    [userId]
+  );
+
+  return tournaments.rows;
+};
+
+const isUserRegisteredToTournament = async (userId, tournamentId) => {
+  const result = await pool.query(
+    `SELECT COUNT(*) AS count 
+     FROM user_tournaments_history 
+     WHERE user_id = $1 AND tournament_id = $2`,
+    [userId, tournamentId]
+  );
+
+  // result.rows[0].count is a string, convert to number
+  return Number(result.rows[0].count) > 0;
+};
+
 module.exports = {
   createTournament,
   updateTournament,
@@ -204,4 +242,6 @@ module.exports = {
   getTournamentById,
   getTournamentsByCompanyId,
   deleteTournament,
+  getTournamentsByUserId,
+  isUserRegisteredToTournament,
 };

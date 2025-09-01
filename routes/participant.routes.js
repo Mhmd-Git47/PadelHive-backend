@@ -4,6 +4,7 @@ const participantController = require("../controllers/participants.controller");
 
 router.post("/", participantController.createParticipant);
 router.patch("/:id", participantController.updateParticipant);
+router.patch("/:id/disqualify", participantController.disqualifyParticipant);
 router.get("/", participantController.getAllParticipants);
 
 // ✅ MOVE THIS ABOVE `/:id`
