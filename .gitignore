@@ -1,0 +1,52 @@
+# ------------------------
+# Node dependencies & builds
+# ------------------------
+node_modules/
+dist/
+build/
+coverage/
+*.lcov
+*.tsbuildinfo
+
+# ------------------------
+# Environment & secrets
+# ------------------------
+.env
+.env.*
+!.env.example   # keep a safe template in Git
+.npmrc          # may contain registry tokens
+
+# ------------------------
+# Logs & runtime
+# ------------------------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+pids/
+*.pid
+
+# ------------------------
+# Caches & temp
+# ------------------------
+.cache/
+.tmp/
+tmp/
+
+# ------------------------
+# OS / editors
+# ------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ------------------------
+# Databases & dumps
+# ------------------------
+*.sql
+*.dump
+db.sqlite3
+*.db
