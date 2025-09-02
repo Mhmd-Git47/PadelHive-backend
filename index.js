@@ -27,7 +27,7 @@ console.log("Current NODE_ENV:", process.env.NODE_ENV);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+app.use(cors(process.env.CORS_ORIGINS));
 
 app.use(express.json());
 
@@ -75,6 +75,6 @@ app.use("/api/admin", adminRoutes);
 // app.use("/api/groups", groupRoutes);
 // app.use("/api/stages", stageRoutes);
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server is running on port ${PORT}`);
 });
