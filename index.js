@@ -4,11 +4,9 @@ const cors = require("cors");
 const dotenv = require("dotenv");
 
 // Load .env.production if NODE_ENV=production, else default .env
-if (process.env.NODE_ENV === "production") {
-  dotenv.config({ path: ".env.production" });
-} else {
-  dotenv.config();
-}
+const envFile =
+  process.env.NODE_ENV === "production" ? ".env.production" : ".env";
+require("dotenv").config({ path: envFile });
 
 const participantsRouter = require("./routes/participants");
 const authRoutes = require("./routes/auth.routes");
