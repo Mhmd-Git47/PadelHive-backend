@@ -75,6 +75,6 @@ app.use("/api/admin", adminRoutes);
 // app.use("/api/groups", groupRoutes);
 // app.use("/api/stages", stageRoutes);
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on port ${PORT}`);
 });
