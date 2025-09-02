@@ -1,212 +1,80 @@
-// const express = require("express");
-// const axios = require("axios");
-// const cors = require("cors");
-// require('dotenv').config();
+const express = require("express");
+const cors = require("cors");
 
+const dotenv = require("dotenv");
 
-// const app = express();
-// const PORT = 3000;
+// Load .env.production if NODE_ENV=production, else default .env
+const envFile =
+  process.env.NODE_ENV === "production" ? ".env.production" : ".env";
+require("dotenv").config();
 
-// app.use(cors());
+const participantsRouter = require("./routes/participants");
+const authRoutes = require("./routes/auth.routes");
+const adminRoutes = require("./routes/admin.routes");
+const challongeTournamentRoutes = require("./routes/tournamentRoutes");
+const tournamentRoutes = require("./routes/tournament.routes");
+const participantsRoutes = require("./routes/participant.routes");
+const matchesRoutes = require("./routes/match.routes");
+const groupRoutes = require("./routes/group.routes");
+const stageRoutes = require("./routes/stage.routes");
+const paymentsRoutes = require("./routes/payments.routes");
+const companyRoutes = require("./routes/company.routes");
+const sponsorRoutes = require("./routes/sponsor.routes");
+const reportRoutes = require("./routes/report.routes");
 
-// const CHALLONGE_API_KEY = process.env.CHALLONGE_API_KEY;
-// const CHALLONGE_USERNAME = "Mhmd_R";
+console.log("Current NODE_ENV:", process.env.NODE_ENV);
 
-// // Get all tournaments
-// app.get("/api/tournaments", async (req, res) => {
-//   try {
-//     const respone = await axios.get(
-//       `https://api.challonge.com/v1/tournaments.json`,
-//       {
-//         params: {
-//           api_key: CHALLONGE_API_KEY,
-//         },
-//       }
-//     );
-//     res.json(respone.data);
-//   } catch (error) {
-//     console.error("Error fetching tournaments:", error);
-//     res.status(500).json({ error: "Failed to fetch tournaments" });
-//   }
-// });
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-// // get single tournament information
-// app.get("/api/tournament/:id", async (req, res) => {
-//   try {
-//     const response = await axios.get(
-//       `https://api.challonge.com/v1/tournaments/${req.params.id}.json`,
-//       {
-//         params: {
-//           api_key: CHALLONGE_API_KEY,
-//         },
-//       }
-//     );
-//     res.json(response.data);
-//   } catch (error) {
-//     console.error("Error fetching tournament:", error);
-//     res.status(500).json({ error: "Failed to fetch tournament" });
-//   }
-// });
+app.use(cors(process.env.CORS_ORIGINS));
 
-// // get participants of a tournament
-// app.get("/api/tournament/:id/participants", async (req, res) => {
-//   try {
-//     const response = await axios.get(
-//       `https://api.challonge.com/v1/tournaments/${req.params.id}/participants.json`,
-//       {
-//         params: {
-//           api_key: CHALLONGE_API_KEY,
-//         },
-//       }
-//     );
-//     res.json(response.data);
-//   } catch (error) {
-//     console.error("Error fetching participants:", error);
-//     res.status(500).json({ error: "Failed to fetch participants" });
-//   }
-// });
+app.use(express.json());
 
-// // get matches of a tournament
-// app.get("/api/tournament/:id/matches", async (req, res) => {
-//   try {
-//     const response = await axios.get(
-//       `https://api.challonge.com/v1/tournaments/${req.params.id}/matches.json`,
-//       {
-//         params: {
-//           api_key: CHALLONGE_API_KEY,
-//         },
-//       }
-//     );
-//     res.json(response.data);
-//   } catch (error) {
-//     console.error("Error fetching matches:", error);
-//     res.status(500).json({ error: "Failed to fetch matches" });
-//   }
-// });
+// api integration
+// app.use("/api", challongeTournamentRoutes);
 
-// // get standings of a tournament
-// async function getStandings(tournamentId) {
-//   try {
-//     const res = await axios.get(
-//       `https://api.challonge.com/v1/tournaments/${tournamentId}.json`,
-//       {
-//         params: {
-//           api_key: CHALLONGE_API_KEY,
-//           include_participants: 1,
-//         },
-//       }
-//     );
+// tournaments - postgre
+app.use("/api/tournaments", tournamentRoutes);
+app.use("/api/participants", participantsRoutes);
+app.use("/api/matches", matchesRoutes);
+app.use("/api/groups", groupRoutes);
+app.use("/api/stages", stageRoutes);
+app.use("/api/payments", paymentsRoutes);
+app.use("/api/company", companyRoutes);
+app.use("/api/sponsors", sponsorRoutes);
+app.use("/api/reports", reportRoutes);
 
-//     const participants = res.data.tournament.participants;
+// get images
+app.use("/api/images/users", express.static("images/users"));
+app.use("/api/images/tournaments", express.static("images/tournaments"));
+app.use("/api/images/sponsors", express.static("images/sponsors"));
 
-//     // Sort by final_rank
-//     const standings = participants
-//       .filter((p) => p.participant.final_rank !== null)
-//       .sort((a, b) => a.participant.final_rank - b.participant.final_rank);
+// backend integration
+app.use("/api/participants", participantsRouter);
 
-//     return standings.map((p) => ({
-//       name: p.participant.name,
-//       finalRank: p.participant.final_rank,
-//     }));
-//   } catch (error) {
-//     console.error("Error fetching standings:", error);
-//     return [];
-//   }
-// }
+// admin
+app.use("/api/auth", authRoutes);
+app.use("/api/admin", adminRoutes);
 
-// app.get("/api/standings/:tournamentId", async (req, res) => {
-//   const standings = await getStandings(req.params.tournamentId);
-//   res.json(standings);
-// });
+// Change later (uncomment to use them)
+// Static file access
+// app.use("/images/users", express.static("images/users"));
 
-// app.get("/api/tournament/:id/group-standings", async (req, res) => {
-//   try {
-//     const [participantsRes, matchesRes] = await Promise.all([
-//       axios.get(
-//         `https://api.challonge.com/v1/tournaments/${req.params.id}/participants.json`,
-//         {
-//           params: { api_key: CHALLONGE_API_KEY },
-//         }
-//       ),
-//       axios.get(
-//         `https://api.challonge.com/v1/tournaments/${req.params.id}/matches.json`,
-//         {
-//           params: { api_key: CHALLONGE_API_KEY },
-//         }
-//       ),
-//     ]);
+// // 🔐 Auth & Admin
+// app.use("/api/auth", authRoutes);
+// app.use("/api/admin", adminRoutes);
 
-//     const participants = participantsRes.data.map((p) => p.participant);
-//     const matches = matchesRes.data.map((m) => m.match);
+// // 🌐 External Integrations
+// app.use("/api/integrations/challonge", challongeTournamentRoutes);
 
-//     // Build a map for quick participant access
-//     const participantStats = {};
-//     participants.forEach((p) => {
-//       participantStats[p.group_player_ids[0]] = {
-//         group_id: p.group_id || null,
-//         participant_id: p.id,
-//         group_player_ids: p.group_player_ids,
-//         name: p.name,
-//         setWins: 0,
-//         matchWins: 0,
-//         matchLosses: 0,
-//         matchTies: 0,
-//         points: 0,
-//         history: [],
-//         totalScore: 0,
-//       };
-//     });
+// // 🏆 Core App API
+// app.use("/api/tournaments", tournamentRoutes);
+// app.use("/api/participants", participantsRoutes);
+// app.use("/api/matches", matchesRoutes);
+// app.use("/api/groups", groupRoutes);
+// app.use("/api/stages", stageRoutes);
 
-//     matches.forEach((match) => {
-//       const p1 = participantStats[match.player1_id];
-//       const p2 = participantStats[match.player2_id];
-
-//       if (!p1 || !p2) return;
-
-//       const scores = match.scores_csv?.split(",") || [];
-
-//       scores.forEach((score) => {
-//         const [s1, s2] = score.split("-").map(Number);
-//         if (s1 > s2) p1.setWins++;
-//         else if (s2 > s1) p2.setWins++;
-
-//         p1.totalScore = (p1.totalScore || 0) + s1;
-//         p2.totalScore = (p2.totalScore || 0) + s2;
-
-//       });
-
-//       if (match.winner_id === match.player1_id) {
-//         p1.matchWins++;
-//         p1.points += 3;
-//         p1.history.push("W");
-//         p2.matchLosses++;
-//         p2.history.push("L");
-//       } else if (match.winner_id === match.player2_id) {
-//         p2.matchWins++;
-//         p2.points += 3;
-//         p2.history.push("W");
-//         p1.matchLosses++;
-//         p1.history.push("L");
-//       } else {
-//         p1.matchTies++;
-//         p2.matchTies++;
-//         p1.points += 1;
-//         p2.points += 1;
-//         p1.history.push("T");
-//         p2.history.push("T");
-//       }
-//     });
-
-//     // Return as flat array (you can group on frontend if needed)
-//     const result = Object.values(participantStats);
-
-//     res.json(result);
-//   } catch (error) {
-//     console.error("Error fetching group standings:", error.message);
-//     res.status(500).json({ error: "Failed to get group standings" });
-//   }
-// });
-
-// app.listen(PORT, () => {
-//   console.log(`Server is running on http://localhost:${PORT}`);
-// });
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server is running on port ${PORT}`);
+});
