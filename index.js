@@ -6,7 +6,7 @@ const dotenv = require("dotenv");
 // Load .env.production if NODE_ENV=production, else default .env
 const envFile =
   process.env.NODE_ENV === "production" ? ".env.production" : ".env";
-require("dotenv").config({ path: envFile });
+require("dotenv").config();
 
 const participantsRouter = require("./routes/participants");
 const authRoutes = require("./routes/auth.routes");
