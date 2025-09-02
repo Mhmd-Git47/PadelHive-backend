@@ -29,20 +29,20 @@ app.use(express.json());
 app.use("/api", challongeTournamentRoutes);
 
 // tournaments - postgre
-app.use("/tournaments", tournamentRoutes);
-app.use("/participants", participantsRoutes);
-app.use("/matches", matchesRoutes);
-app.use("/groups", groupRoutes);
-app.use("/stages", stageRoutes);
-app.use("/payments", paymentsRoutes);
-app.use("/company", companyRoutes);
-app.use("/sponsors", sponsorRoutes);
-app.use("/reports", reportRoutes);
+app.use("/api/tournaments", tournamentRoutes);
+app.use("/api/participants", participantsRoutes);
+app.use("/api/matches", matchesRoutes);
+app.use("/api/groups", groupRoutes);
+app.use("/api/stages", stageRoutes);
+app.use("/api/payments", paymentsRoutes);
+app.use("/api/company", companyRoutes);
+app.use("/api/sponsors", sponsorRoutes);
+app.use("/api/reports", reportRoutes);
 
 // get images
-app.use("/images/users", express.static("images/users"));
-app.use("/images/tournaments", express.static("images/tournaments"));
-app.use("/images/sponsors", express.static("images/sponsors"));
+app.use("/api/images/users", express.static("images/users"));
+app.use("/api/images/tournaments", express.static("images/tournaments"));
+app.use("/api/images/sponsors", express.static("images/sponsors"));
 
 // backend integration
 app.use("/api/participants", participantsRouter);

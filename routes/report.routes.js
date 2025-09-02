@@ -11,4 +11,7 @@ router.get("/", reportController.getReports);
 // Get reports by userId (either reporter or reported)
 router.get("/user/:userId", reportController.getReportsByUserId);
 
+// Update report
+router.patch("/:id/update", reportController.updateReport);
+
 module.exports = router;

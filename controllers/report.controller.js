@@ -49,8 +49,46 @@ const getReportsByUserId = async (req, res) => {
   }
 };
 
+const updateReport = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updatedData = req.body;
+    if (!id) {
+      res.status(400).json({ mesasge: "Report Id is required" });
+    }
+
+    const updatedReport = await reportService.updateReport(id, updatedData);
+    res.json(updatedReport);
+  } catch (err) {
+    console.error("Error updating report:", error);
+    res.json(500).error({
+      message: "Failed to update report. Please try again later.",
+      error: "Internal Server Error",
+    });
+  }
+};
+
+const deleteReport = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({ mesasge: "Report Id is required" });
+    }
+
+    const updatedReport = await reportService.deleteReport(id);
+    res.json(updatedReport);
+  } catch (err) {
+    console.error("Error deleting report:", error);
+    res.json(500).error({
+      message: "Failed to delete report. Please try again later.",
+      error: "Internal Server Error",
+    });
+  }
+};
+
 module.exports = {
   createReport,
   getReports,
   getReportsByUserId,
+  updateReport,
 };

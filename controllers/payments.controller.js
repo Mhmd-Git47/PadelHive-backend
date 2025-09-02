@@ -25,8 +25,9 @@ exports.updatePayment = async (req, res) => {
     return res.json(updatedParticipant);
   } catch (err) {
     console.error(`Failed updating stage participant: ${err}`);
-    return res
-      .status(500)
-      .json({ error: "Server error while updating stage participant." });
+    return res.status(500).json({
+      message: "Failed to update payment. Please try again later.",
+      error: "Server error while updating stage participant.",
+    });
   }
 };
