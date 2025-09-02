@@ -1,10 +1,18 @@
 const express = require("express");
 const cors = require("cors");
-const participantsRouter = require("./routes/participants");
 
+const dotenv = require("dotenv");
+
+// Load .env.production if NODE_ENV=production, else default .env
+if (process.env.NODE_ENV === "production") {
+  dotenv.config({ path: ".env.production" });
+} else {
+  dotenv.config(); 
+}
+
+const participantsRouter = require("./routes/participants");
 const authRoutes = require("./routes/auth.routes");
 const adminRoutes = require("./routes/admin.routes");
-
 const challongeTournamentRoutes = require("./routes/tournamentRoutes");
 const tournamentRoutes = require("./routes/tournament.routes");
 const participantsRoutes = require("./routes/participant.routes");
@@ -16,7 +24,6 @@ const companyRoutes = require("./routes/company.routes");
 const sponsorRoutes = require("./routes/sponsor.routes");
 const reportRoutes = require("./routes/report.routes");
 
-require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,7 +33,7 @@ app.use(cors());
 app.use(express.json());
 
 // api integration
-app.use("/api", challongeTournamentRoutes);
+// app.use("/api", challongeTournamentRoutes);
 
 // tournaments - postgre
 app.use("/api/tournaments", tournamentRoutes);
