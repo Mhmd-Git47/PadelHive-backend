@@ -81,6 +81,7 @@ exports.getAllTournaments = async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error("Failed fetching tournaments: ", err.message);
+    console.error("DB query failed:", err);
     res.status(500).json({ error: "Failed loading tournaments" });
   }
 };
