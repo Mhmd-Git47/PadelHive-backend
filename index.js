@@ -7,7 +7,7 @@ const dotenv = require("dotenv");
 if (process.env.NODE_ENV === "production") {
   dotenv.config({ path: ".env.production" });
 } else {
-  dotenv.config(); 
+  dotenv.config();
 }
 
 const participantsRouter = require("./routes/participants");
@@ -24,6 +24,7 @@ const companyRoutes = require("./routes/company.routes");
 const sponsorRoutes = require("./routes/sponsor.routes");
 const reportRoutes = require("./routes/report.routes");
 
+console.log("Current NODE_ENV:", process.env.NODE_ENV);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
