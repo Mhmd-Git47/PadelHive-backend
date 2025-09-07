@@ -106,21 +106,41 @@ const registerUser = async ({
   category,
   elo_rate,
   display_name,
+  country_code,
 }) => {
   // 1. Check if email already registered
-  const existing = await pool.query("SELECT * FROM users WHERE email = $1", [
-    email,
-  ]);
+  const errors = [];
 
+  // Check if email exists
+  const existingEmail = await pool.query(
+    "SELECT * FROM users WHERE email = $1",
+    [email]
+  );
+  if (existingEmail.rows.length > 0) {
+    errors.push("Email already registered");
+  }
+
+  // Check if display name exists
   const existingDisplayName = await pool.query(
     "SELECT * FROM users WHERE display_name = $1",
     [display_name]
   );
-  if (existing.rows.length > 0) {
-    throw new Error("Email already registered");
-  }
   if (existingDisplayName.rows.length > 0) {
-    throw new Error("Display Name already registered");
+    errors.push("Display Name already registered");
+  }
+
+  // Check if phone number exists
+  const existingPhoneNumber = await pool.query(
+    "SELECT * FROM users WHERE phone_number = $1",
+    [phone_number]
+  );
+  if (existingPhoneNumber.rows.length > 0) {
+    errors.push("Phone Number already registered");
+  }
+
+  // If any conflicts, throw a combined error
+  if (errors.length > 0) {
+    throw new Error(errors.join(", "));
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);

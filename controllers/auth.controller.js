@@ -36,6 +36,7 @@ exports.register = async (req, res) => {
       category,
       elo_rate,
       display_name,
+      country_code,
     } = req.body;
 
     const image_url = req.file ? req.file.filename : null;
@@ -54,6 +55,7 @@ exports.register = async (req, res) => {
       category,
       elo_rate,
       display_name,
+      country_code,
     });
 
     res.status(201).json({ message: "User registered", user });
@@ -175,7 +177,11 @@ exports.forgotPasswordOtp = async (req, res) => {
 exports.resetPasswordOtp = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
-    const result = await authService.resetPasswordWithOtp({ email, otp, newPassword });
+    const result = await authService.resetPasswordWithOtp({
+      email,
+      otp,
+      newPassword,
+    });
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });

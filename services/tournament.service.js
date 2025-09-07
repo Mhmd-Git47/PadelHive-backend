@@ -227,13 +227,15 @@ const isUserRegisteredToTournament = async (userId, tournamentId) => {
   const result = await pool.query(
     `SELECT COUNT(*) AS count 
      FROM user_tournaments_history 
-     WHERE user_id = $1 AND tournament_id = $2`,
+     WHERE user_id = $1 AND tournament_id = $2 AND status = 'registered'`,
     [userId, tournamentId]
   );
 
   // result.rows[0].count is a string, convert to number
   return Number(result.rows[0].count) > 0;
 };
+
+
 
 module.exports = {
   createTournament,

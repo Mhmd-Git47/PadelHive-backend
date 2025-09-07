@@ -14,6 +14,8 @@ router.get("/tournament", participantController.getParticipantsByTournamentId);
 router.delete("/:id", participantController.deleteParticipant);
 router.get("/:id", participantController.getParticipantById);
 
+router.post("/check-name", participantController.checkParticipantName);
+
 module.exports = router;
 
 // router.post("/", participantController.createParticipant);

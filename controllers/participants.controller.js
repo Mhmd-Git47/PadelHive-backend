@@ -97,3 +97,25 @@ exports.deleteParticipant = async (req, res) => {
     res.status(500).json({ error: "Error deleting participant: ", err });
   }
 };
+
+exports.checkParticipantName = async (req, res) => {
+  try {
+    const { name, tournamentId } = req.body;
+
+    if (!name || !tournamentId) {
+      return res
+        .status(400)
+        .json({ error: "Name and tournamentId are required" });
+    }
+
+    const available = await participantService.isParticipantNameValid(
+      name,
+      tournamentId
+    );
+
+    res.status(200).json({ available });
+  } catch (err) {
+    console.error("Error checking participant name:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+};

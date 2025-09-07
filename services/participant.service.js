@@ -254,6 +254,17 @@ const deleteParticipant = async (participantId) => {
   }
 };
 
+const isParticipantNameValid = async (name, tournamentId) => {
+  const result = await pool.query(
+    `SELECT COUNT(*) AS count 
+     FROM participants 
+     WHERE name = $1 AND tournament_id = $2`,
+    [name, tournamentId]
+  );
+
+  return Number(result.rows[0].count) === 0;
+};
+
 module.exports = {
   createParticipant,
   getAllParticipants,
@@ -262,4 +273,5 @@ module.exports = {
   getParticipantsByTournamentId,
   deleteParticipant,
   disqualifyParticipant,
+  isParticipantNameValid,
 };

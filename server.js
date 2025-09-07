@@ -21,6 +21,7 @@ const paymentsRoutes = require("./routes/payments.routes");
 const companyRoutes = require("./routes/company.routes");
 const sponsorRoutes = require("./routes/sponsor.routes");
 const reportRoutes = require("./routes/report.routes");
+const contactRoutes = require("./routes/contact.routes");
 
 console.log("Current NODE_ENV:", process.env.NODE_ENV);
 
@@ -44,6 +45,7 @@ app.use("/api/payments", paymentsRoutes);
 app.use("/api/company", companyRoutes);
 app.use("/api/sponsors", sponsorRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/contact", contactRoutes);
 
 // get images
 app.use("/api/images/users", express.static("images/users"));

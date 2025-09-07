@@ -81,4 +81,31 @@ async function sendEmail({ to, subject, html, text }) {
   }
 }
 
-module.exports = { sendVerificationEmail, sendEmail };
+async function sendContactEmail({ to, name, email, phone, message }) {
+  const toEmail = to;
+  const subject = `New Contact Form Submission from ${name}`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+      <h2 style="color: #333;">New Contact Message</h2>
+      <p><strong>Name:</strong> ${name}</p>
+      <p><strong>Email:</strong> ${email}</p>
+      <p><strong>Phone:</strong> ${phone}</p>
+      <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+      <p><strong>Message:</strong></p>
+      <p style="white-space: pre-wrap; background-color: #f4f4f4; padding: 15px; border-radius: 8px;">${message}</p>
+    </div>
+  `;
+
+  const text = `
+    New Contact Form Submission:
+    Name: ${name}
+    Email: ${email}
+    Phone: ${phone}
+    Message:
+    ${message}
+  `;
+
+  await sendEmail({ to: toEmail, subject, html, text });
+}
+
+module.exports = { sendVerificationEmail, sendEmail, sendContactEmail };
