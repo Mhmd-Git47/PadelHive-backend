@@ -185,14 +185,9 @@ async function onDeleteParticipantUpdateTournamentHistory(
       [participantId]
     );
   } else {
-    // If participant is deleted normally → nullify participant_id & mark cancelled
+    // If participant is deleted normally → delete tournament from history
     await client.query(
-      `UPDATE user_tournaments_history
-       SET participant_id = NULL,
-           status = 'cancelled',
-           cancelled_at = NOW(),
-           updated_at = NOW()
-       WHERE participant_id = $1`,
+      `DELETE FROM user_tournaments_history WHERE participant_id = $1`,
       [participantId]
     );
   }

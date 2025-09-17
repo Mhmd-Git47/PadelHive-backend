@@ -40,3 +40,38 @@ exports.updateCompany = async (req, res) => {
     res.status(500).json({ error: "Failed to update company" });
   }
 };
+
+exports.getPublicCompanyInfo = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({ message: "Company ID is required" });
+    }
+
+    const company = await companyService.getCompanyById(id);
+
+    if (!company) {
+      return res.status(404).json({ message: "Company not found" });
+    }
+
+    // Only return public-safe fields
+    const publicData = {
+      id: company.id,
+      clubName: company.club_name,
+      ownerName: company.owner_name,
+      country: company.country,
+      city: company.city,
+      // address: company.address,
+      // latitude: company.latitude,
+      // longitude: company.longitude,
+      courtsNumber: company.courts_number,
+      // phoneNumber: company.phone_number, 
+    };
+
+    res.json(publicData);
+  } catch (err) {
+    console.error("Error fetching public company info:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};

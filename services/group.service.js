@@ -8,7 +8,7 @@ const matchHelper = require("../helpers/match.helper");
 const { getMatchesByTournamentId } = require("../shared/matchGrouped.shared");
 
 const createGroups = async (tournamentId, stageId, groupCount) => {
-  const client = await pool.connect(); // ✅ Only once
+  const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
@@ -70,8 +70,24 @@ const createGroupsWithParticipants = async (
       }
     }
 
-    // await matchHelper.generateMatchesForStages(tournamentId, stageId, client);
     await client.query("COMMIT");
+
+    // ✅ Emit socket event
+    if (global.io) {
+      const updatedGroups = await getGroupsByStageId(stageId);
+      const groupsWithParticipants = await Promise.all(
+        updatedGroups.map(async (g) => {
+          const participants = await getParticipantsByGroupId(g.id);
+          return { ...g, participants };
+        })
+      );
+
+      global.io.to(`tournament_${tournamentId}`).emit("groups-updated", {
+        tournamentId,
+        stageId,
+        groups: groupsWithParticipants,
+      });
+    }
     return createdGroups;
   } catch (err) {
     await client.query("ROLLBACK");
@@ -84,60 +100,81 @@ const createGroupsWithParticipants = async (
 // if need to update groups to another
 const updateGroupParticipants = async (tournamentId, stageId, groupsData) => {
   const client = await pool.connect();
-
   try {
     await client.query("BEGIN");
 
-    // 1. Delete group participants for groups in this stage
-    await client.query(
-      `
-      DELETE FROM group_participants 
-      WHERE group_id IN (
-        SELECT id FROM groups WHERE tournament_id = $1 AND stage_id = $2
-      );
-      `,
+    const existingGroupsRes = await client.query(
+      `SELECT * FROM groups WHERE tournament_id=$1 AND stage_id=$2 ORDER BY group_index`,
       [tournamentId, stageId]
     );
+    const existingGroups = existingGroupsRes.rows;
 
-    // 2. Delete the groups themselves
-    await client.query(
-      `
-      DELETE FROM groups 
-      WHERE tournament_id = $1 AND stage_id = $2;
-      `,
-      [tournamentId, stageId]
-    );
+    for (let i = 0; i < groupsData.length; i++) {
+      const groupData = groupsData[i];
+      let groupId;
 
-    // 3. Re-insert the new groups and their participants
-    const createdGroups = [];
-    let i = 0;
-
-    for (const group of groupsData) {
-      const groupResult = await client.query(
-        `
-        INSERT INTO groups (tournament_id, name, group_index, created_at, updated_at, stage_id)
-        VALUES ($1, $2, $3, NOW(), NOW(), $4)
-        RETURNING *;
-        `,
-        [tournamentId, group.name, i, stageId]
-      );
-      const createdGroup = groupResult.rows[0];
-      createdGroups.push(createdGroup);
-      i++;
-
-      for (const pid of group.participantIds) {
+      if (existingGroups[i]) {
+        // Update existing group
+        groupId = existingGroups[i].id;
         await client.query(
-          `
-          INSERT INTO group_participants (group_id, participant_id)
-          VALUES ($1, $2);
-          `,
-          [createdGroup.id, pid]
+          `UPDATE groups SET name=$1, updated_at=NOW() WHERE id=$2`,
+          [groupData.name, groupId]
+        );
+        await client.query(`DELETE FROM group_participants WHERE group_id=$1`, [
+          groupId,
+        ]);
+      } else {
+        // Insert new group
+        const res = await client.query(
+          `INSERT INTO groups (tournament_id, stage_id, name, group_index, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,NOW(),NOW()) RETURNING id`,
+          [tournamentId, stageId, groupData.name, i]
+        );
+        groupId = res.rows[0].id;
+      }
+
+      // Insert participants
+      for (const pid of groupData.participantIds) {
+        await client.query(
+          `INSERT INTO group_participants (group_id, participant_id) VALUES ($1,$2)`,
+          [groupId, pid]
         );
       }
     }
 
+    // Optionally: remove extra old groups
+    if (existingGroups.length > groupsData.length) {
+      const idsToRemove = existingGroups
+        .slice(groupsData.length)
+        .map((g) => g.id);
+      await client.query(
+        `DELETE FROM group_participants WHERE group_id = ANY($1::int[])`,
+        [idsToRemove]
+      );
+      await client.query(`DELETE FROM groups WHERE id = ANY($1::int[])`, [
+        idsToRemove,
+      ]);
+    }
+
     await client.query("COMMIT");
-    return createdGroups;
+
+    // Emit updated groups with stable IDs
+    // Emit updated groups with participants
+    if (global.io) {
+      const updatedGroups = await getGroupsByStageId(stageId);
+      const groupsWithParticipants = await Promise.all(
+        updatedGroups.map(async (g) => {
+          const participants = await getParticipantsByGroupId(g.id);
+          return { ...g, participants };
+        })
+      );
+
+      global.io.to(`tournament_${tournamentId}`).emit("groups-updated", {
+        tournamentId,
+        stageId,
+        groups: groupsWithParticipants,
+      });
+    }
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -336,6 +373,16 @@ const updateGroup = async (id, updatedData, clientt) => {
     }
 
     await client.query("COMMIT");
+
+    // ✅ Emit socket event
+    if (global.io) {
+      global.io
+        .to(`tournament_${updatedGroup.tournament_id}`)
+        .emit("groups-updated", {
+          group: updatedGroup,
+        });
+    }
+
     return updatedGroup;
   } catch (err) {
     await client.query("ROLLBACK");

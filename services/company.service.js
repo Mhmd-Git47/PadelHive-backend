@@ -13,7 +13,6 @@ const createCompany = async (adminId, companyData) => {
 
   try {
     await client.query("BEGIN");
-
     const insertQuery = `
       INSERT INTO companies (
         club_name,
@@ -23,8 +22,12 @@ const createCompany = async (adminId, companyData) => {
         courts_number,
         created_at,
         updated_at,
-        admin_id
-      ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW(), $6)
+        admin_id,
+        latitude, 
+        longitude, 
+        country, 
+        city
+      ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW(), $6, $7, $8, $9, $10)
       RETURNING *;
     `;
 
@@ -35,6 +38,10 @@ const createCompany = async (adminId, companyData) => {
       companyData.phoneNumber,
       companyData.courtsNumber,
       adminId,
+      companyData.latitude,
+      companyData.longitude,
+      companyData.country,
+      companyData.city,
     ];
 
     const result = await client.query(insertQuery, values);
@@ -83,8 +90,30 @@ const updateCompany = async (id, updateData) => {
   return result.rows[0];
 };
 
+const getPublicCompanyById = async (id) => {
+  const result = await pool.query(
+    `
+    SELECT 
+      id,
+      club_name,
+      city,
+      country,
+      created_at,
+      updated_at
+    FROM companies
+    WHERE id = $1
+    `,
+    [id]
+  );
+
+  if (!result.rows[0]) return null;
+
+  return result.rows[0];
+};
+
 module.exports = {
   getCompanyById,
   createCompany,
   updateCompany,
+  getPublicCompanyById
 };

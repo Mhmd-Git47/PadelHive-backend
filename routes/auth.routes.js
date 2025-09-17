@@ -3,18 +3,17 @@ const router = express.Router();
 const authController = require("../controllers/auth.controller");
 const multer = require("multer");
 
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "images/users/");
-  },
-  filename: function (req, file, cb) {
-    const uniqueName = Date.now() + "-" + file.originalname;
-    cb(null, uniqueName);
-  },
-});
+const storage = multer.memoryStorage();
 
-const upload = multer({ storage });
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith("image/")) {
+    cb(null, true);
+  } else {
+    cb(new Error("Only image files are allowed!"), false);
+  }
+};
 
+const upload = multer({ storage, fileFilter });
 // admin routes
 router.post("/register-admin", authController.registerAdm);
 router.post("/login-admin", authController.loginAdm);

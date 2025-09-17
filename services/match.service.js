@@ -69,12 +69,31 @@ const updateMatch = async (id, updatedData) => {
     // 3️⃣ Handle group stage
     if (updatedMatch.group_id !== null) {
       await handleGroupStage(updatedMatch, client);
+      const groupStandings = await groupService.getGroupStandings(
+        updatedMatch.tournament_id
+      );
+      if (global.io) {
+        global.io
+          .to(`tournament_${updatedMatch.tournament_id}`)
+          .emit("group-standings-updated", {
+            tournamentId: updatedMatch.tournament_id,
+            standings: groupStandings,
+          });
+      }
     } else {
       // 4️⃣ Handle final stage / knockout
       await handleFinalStage(updatedMatch, client);
     }
 
     await client.query("COMMIT");
+
+    // WebSocket: emit updated match to all clients
+    if (global.io) {
+      global.io
+        .to(`tournament_${updatedMatch.tournament_id}`)
+        .emit("match-updated", updatedMatch);
+    }
+
     return updatedMatch;
   } catch (err) {
     await client.query("ROLLBACK");

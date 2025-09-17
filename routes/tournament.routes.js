@@ -10,18 +10,17 @@ const {
 } = require("../middleware/auth.middleware");
 
 // Multer storage config
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "images/tournaments/");
-  },
-  filename: function (req, file, cb) {
-    const uniqueName = Date.now() + "-" + file.originalname;
-    cb(null, uniqueName);
-  },
-});
 
-const upload = multer({ storage });
+const storage = multer.memoryStorage();
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith("image/")) {
+    cb(null, true);
+  } else {
+    cb(new Error("Only image files are allowed!"), false);
+  }
+};
 
+const upload = multer({ storage, fileFilter });
 /**
  * ============================
  * PUBLIC ROUTES (Users / Guests)

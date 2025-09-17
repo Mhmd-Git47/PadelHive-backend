@@ -3,19 +3,16 @@ const router = express.Router();
 const sponsorController = require("../controllers/sponsor.controller");
 const multer = require("multer");
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "images/sponsors/");
-  },
-  filename: (req, file, cb) => {
-    const uniqueName =
-      Date.now() + "-" + file.originalname.replace(/\s+/g, "_");
-    cb(null, uniqueName);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    // Accept only images
+    if (!file.mimetype.startsWith("image/")) {
+      return cb(new Error("Only image files are allowed!"), false);
+    }
+    cb(null, true);
   },
 });
-
-const upload = multer({ storage });
-
 router.post("/", upload.single("logo"), sponsorController.createSponsor);
 router.put("/:id", upload.single("logo"), sponsorController.updateSponsor);
 router.delete("/:id", sponsorController.deleteSponsor);

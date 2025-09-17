@@ -1,17 +1,18 @@
 const express = require("express");
 const cors = require("cors");
-
+const { Server } = require("socket.io");
 const dotenv = require("dotenv");
+const http = require("http");
 
 // Load .env.production if NODE_ENV=production, else default .env
 const envFile =
   process.env.NODE_ENV === "production" ? ".env.production" : ".env";
 require("dotenv").config({ path: envFile });
 
+// routes
 const participantsRouter = require("./routes/participants");
 const authRoutes = require("./routes/auth.routes");
 const adminRoutes = require("./routes/admin.routes");
-const challongeTournamentRoutes = require("./routes/tournamentRoutes");
 const tournamentRoutes = require("./routes/tournament.routes");
 const participantsRoutes = require("./routes/participant.routes");
 const matchesRoutes = require("./routes/match.routes");
@@ -22,6 +23,10 @@ const companyRoutes = require("./routes/company.routes");
 const sponsorRoutes = require("./routes/sponsor.routes");
 const reportRoutes = require("./routes/report.routes");
 const contactRoutes = require("./routes/contact.routes");
+const subscriptionRoutes = require("./routes/subscription.routes");
+
+// cron
+const tournamentCron = require("./cron/tournament.cron");
 
 console.log("Current NODE_ENV:", process.env.NODE_ENV);
 
@@ -46,6 +51,7 @@ app.use("/api/company", companyRoutes);
 app.use("/api/sponsors", sponsorRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/contact", contactRoutes);
+app.use("/api/subscribe", subscriptionRoutes);
 
 // get images
 app.use("/api/images/users", express.static("images/users"));
@@ -77,6 +83,41 @@ app.use("/api/admin", adminRoutes);
 // app.use("/api/groups", groupRoutes);
 // app.use("/api/stages", stageRoutes);
 
-app.listen(PORT, "0.0.0.0", () => {
+// Web Socket setup
+const server = http.createServer(app);
+
+const io = new Server(server, {
+  cors: {
+    origin: process.env.CORS_ORIGINS,
+    methods: ["GET", "POST"],
+  },
+});
+
+global.io = io;
+
+// Attach io instance to cron job
+tournamentCron.setSocketInstance(io);
+
+io.on("connection", (socket) => {
+  console.log("✅ Client connected:", socket.id);
+
+  // Client joins a tournament room
+  socket.on("joinTournament", (tournamentId) => {
+    socket.join(`tournament_${tournamentId}`);
+    console.log(`📌 Client ${socket.id} joined tournament_${tournamentId}`);
+  });
+
+  // Client leaves a tournament room
+  socket.on("leaveTournament", (tournamentId) => {
+    socket.leave(`tournament_${tournamentId}`);
+    console.log(`📌 Client ${socket.id} left tournament_${tournamentId}`);
+  });
+
+  socket.on("disconnect", () => {
+    console.log("❌ Client disconnected:", socket.id);
+  });
+});
+
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`Server is running on port ${PORT}`);
 });

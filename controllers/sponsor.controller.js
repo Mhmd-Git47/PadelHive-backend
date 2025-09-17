@@ -1,16 +1,37 @@
 const sponsorService = require("../services/sponsor.service");
+const fs = require("fs");
+const path = require("path");
+const sharp = require("sharp");
+
+const IMAGE_UPLOAD_PATH = path.join(__dirname, "..", "images", "sponsors");
+
+if (!fs.existsSync(IMAGE_UPLOAD_PATH)) {
+  fs.mkdirSync(IMAGE_UPLOAD_PATH, { recursive: true });
+}
+
+async function processLogo(file) {
+  const filename = `sponsor-${Date.now()}.webp`;
+  const outputPath = path.join(IMAGE_UPLOAD_PATH, filename);
+
+  await sharp(file.buffer)
+    .resize({ width: 512, height: 512, fit: "cover" })
+    .webp({ quality: 80 }) // compress
+    .toFile(outputPath);
+
+  return filename;
+}
 
 exports.createSponsor = async (req, res) => {
   try {
-    const logoUrl = req.file
-      ? `${req.protocol}://${req.get("host")}/images/sponsors/${
-          req.file.filename
-        }`
-      : null;
+    let logoFileName = null;
+
+    if (req.file) {
+      logoFileName = await processLogo(req.file);
+    }
 
     const sponsorData = {
       ...req.body,
-      logo_url: logoUrl,
+      logo_url: logoFileName,
     };
 
     const sponsor = await sponsorService.createSponsor(sponsorData);
@@ -25,20 +46,33 @@ exports.updateSponsor = async (req, res) => {
   try {
     const { id } = req.params;
 
-    let updateData = { ...req.body };
-
-    if (req.file) {
-      updateData.logo_url = `${req.protocol}://${req.get(
-        "host"
-      )}/images/sponsors/${req.file.filename}`;
-    }
-
-    const updatedSponsor = await sponsorService.updateSponsor(id, updateData);
-
-    if (!updatedSponsor) {
+    // Get current sponsor from DB
+    const sponsor = await sponsorService.getSponsorById(id);
+    if (!sponsor) {
       return res.status(404).json({ error: "Sponsor not found" });
     }
 
+    let logoFileName = sponsor.logo_url; // current filename in DB
+
+    if (req.file) {
+      // Process new logo
+      logoFileName = await processLogo(req.file);
+
+      // Delete old logo if exists
+      if (sponsor.logo_url) {
+        const oldPath = path.join(IMAGE_UPLOAD_PATH, sponsor.logo_url);
+        if (fs.existsSync(oldPath)) {
+          fs.unlinkSync(oldPath);
+        }
+      }
+    }
+
+    const updateData = {
+      ...req.body,
+      logo_url: logoFileName, // still just a filename
+    };
+
+    const updatedSponsor = await sponsorService.updateSponsor(id, updateData);
     res.json(updatedSponsor);
   } catch (err) {
     console.error("Error updating sponsor:", err.message);
@@ -49,11 +83,18 @@ exports.updateSponsor = async (req, res) => {
 exports.deleteSponsor = async (req, res) => {
   try {
     const { id } = req.params;
-    const success = await sponsorService.deleteSponsor(id);
-
-    if (!success) {
+    const sponsor = await sponsorService.getSponsorById(id);
+    if (!sponsor) {
       return res.status(404).json({ error: "Sponsor not found" });
     }
+
+    if (sponsor.logo_url) {
+      const filePath = path.join(IMAGE_UPLOAD_PATH, sponsor.logo_url);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+    const success = await sponsorService.deleteSponsor(id);
 
     res.json({ message: "Sponsor deleted successfully" });
   } catch (err) {

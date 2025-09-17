@@ -28,4 +28,6 @@ router.get(
   companyController.getCompanyById
 );
 
+router.get("/:id/public", companyController.getPublicCompanyInfo);
+
 module.exports = router;

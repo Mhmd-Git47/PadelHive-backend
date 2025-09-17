@@ -2,18 +2,33 @@ const tournamentService = require("../services/tournament.service");
 const stageService = require("../services/stage.service");
 const fs = require("fs");
 const path = require("path");
+const sharp = require("sharp");
 
 exports.createTournament = async (req, res) => {
   try {
-    const posterUrl = req.file
-      ? `${req.protocol}://${req.get("host")}/images/tournaments/${
-          req.file.filename
-        }`
-      : null;
+    let posterFilename = null;
+
+    if (req.file) {
+      posterFilename = `poster-${Date.now()}.webp`;
+      const outputPath = path.join(
+        __dirname,
+        "..",
+        "images",
+        "tournaments",
+        posterFilename
+      );
+
+      const processedImage = await sharp(req.file.buffer)
+        .resize({ width: 1080, withoutEnlargement: true })
+        .webp({ quality: 80 })
+        .toBuffer();
+
+      fs.writeFileSync(outputPath, processedImage);
+    }
 
     const tournamentData = {
       ...req.body,
-      poster_url: posterUrl,
+      poster_url: posterFilename,
     };
 
     const tournament = await tournamentService.createTournament(tournamentData);
@@ -27,9 +42,8 @@ exports.createTournament = async (req, res) => {
 exports.updateTournament = async (req, res) => {
   try {
     const { id } = req.params;
-
-    // Get current tournament from DB
     const existingTournament = await tournamentService.getTournamentById(id);
+
     if (!existingTournament) {
       return res.status(404).json({ error: "Tournament not found" });
     }
@@ -37,33 +51,40 @@ exports.updateTournament = async (req, res) => {
     const updatedData = { ...req.body };
 
     if (req.file) {
-      // Construct new poster URL
-      const newPosterUrl = `${req.protocol}://${req.get(
-        "host"
-      )}/images/tournaments/${req.file.filename}`;
-      updatedData.poster_url = newPosterUrl;
+      const posterFilename = `poster-${Date.now()}.webp`;
+      const outputPath = path.join(
+        __dirname,
+        "..",
+        "images",
+        "tournaments",
+        posterFilename
+      );
 
-      // Delete old image file if exists
+      const processedImage = await sharp(req.file.buffer)
+        .resize({ width: 1080, withoutEnlargement: true })
+        .webp({ quality: 80 })
+        .toBuffer();
+
+      fs.writeFileSync(outputPath, processedImage);
+
+      // delete old poster if exists
       if (existingTournament.poster_url) {
-        const oldImagePath = path.join(
+        const oldPath = path.join(
           __dirname,
           "..",
           "images",
           "tournaments",
-          path.basename(existingTournament.poster_url)
+          existingTournament.poster_url
         );
-
-        fs.unlink(oldImagePath, (err) => {
-          if (err) {
-            console.warn("Failed to delete old poster image:", err.message);
-          }
+        fs.unlink(oldPath, (err) => {
+          if (err) console.warn(err);
         });
       }
+
+      updatedData.poster_url = posterFilename;
     }
 
-    // Update tournament record in DB
     const result = await tournamentService.updateTournament(id, updatedData);
-
     if (!result) {
       return res.status(404).json({ error: "Tournament not found" });
     }

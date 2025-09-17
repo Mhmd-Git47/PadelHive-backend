@@ -1,4 +1,7 @@
 const authService = require("../services/auth.service");
+const path = require("path");
+const fs = require("fs");
+const sharp = require("sharp");
 
 exports.registerAdm = async (req, res) => {
   try {
@@ -23,7 +26,7 @@ exports.loginAdm = async (req, res) => {
 
 exports.register = async (req, res) => {
   try {
-    const {
+    let {
       first_name,
       last_name,
       email,
@@ -39,8 +42,60 @@ exports.register = async (req, res) => {
       country_code,
     } = req.body;
 
-    const image_url = req.file ? req.file.filename : null;
+    // 1️⃣ Calculate ELO based on chosen category
+    let calculatedElo = 9000; // default
+    let calculatedCategory = "D-";
 
+    switch ((category || "").toLowerCase()) {
+      case "beginner":
+        calculatedElo = 900;
+        calculatedCategory = "D-";
+        break;
+      case "intermediate":
+        calculatedElo = 1050;
+        calculatedCategory = "C-";
+        break;
+      case "advanced":
+        calculatedElo = 1200;
+        calculatedCategory = "B-";
+        break;
+      case "professional":
+        calculatedElo = 1350;
+        calculatedCategory = "A-";
+        break;
+      case "elite":
+        calculatedElo = 1500;
+        calculatedCategory = "A+";
+        break;
+    }
+
+    // 2️⃣ Check frontend-provided elo_rate
+    if (!elo_rate || Number(elo_rate) !== calculatedElo) {
+      elo_rate = calculatedElo; // override if mismatched
+      category = calculatedCategory; // ensure category matches elo
+    }
+
+    // 3️⃣ Handle profile image
+    let image_url = null;
+    if (req.file) {
+      const filename = `user-${Date.now()}.webp`;
+      const outputPath = path.join(
+        __dirname,
+        "..",
+        "images",
+        "users",
+        filename
+      );
+
+      await sharp(req.file.buffer)
+        .resize({ width: 512, height: 512, fit: "cover" })
+        .webp({ quality: 80 })
+        .toFile(outputPath);
+
+      image_url = filename;
+    }
+
+    // 4️⃣ Register the user
     const user = await authService.registerUser({
       first_name,
       last_name,
@@ -108,10 +163,36 @@ exports.getUserById = async (req, res) => {
   }
 };
 
+const IMAGE_UPLOAD_PATH = path.join(__dirname, "..", "images/users");
 exports.updateUser = async (req, res) => {
   try {
     const userId = req.params.id;
+    let newImageName = req.body.existingImageName || null;
 
+    // 1️⃣ Process new image if uploaded
+    if (req.file) {
+      newImageName = `user-${Date.now()}.webp`; // unique filename
+      const outputPath = path.join(IMAGE_UPLOAD_PATH, newImageName);
+
+      // Resize, compress, convert to WebP
+      await sharp(req.file.buffer)
+        .resize({ width: 512, height: 512, fit: "cover" })
+        .webp({ quality: 80 })
+        .toFile(outputPath);
+
+      // Delete old image if exists
+      if (req.body.existingImageName) {
+        const oldPath = path.join(
+          IMAGE_UPLOAD_PATH,
+          req.body.existingImageName
+        );
+        fs.unlink(oldPath, (err) => {
+          if (err) console.warn("Failed to delete old image:", err.message);
+        });
+      }
+    }
+
+    // 2️⃣ Prepare user data for update
     const userData = {
       firstName: req.body.first_name,
       lastName: req.body.last_name,
@@ -121,19 +202,18 @@ exports.updateUser = async (req, res) => {
       dateOfBirth: req.body.date_of_birth,
       gender: req.body.gender,
       address: req.body.address,
-      imageName: req.file
-        ? req.file.filename
-        : req.body.existingImageName || null,
+      imageName: newImageName,
     };
 
+    // 3️⃣ Update user in DB
     const updatedUser = await authService.updateUser(userId, userData);
+
     res.json(updatedUser);
   } catch (err) {
     console.error("Update user error:", err);
     res.status(400).json({ error: err.message });
   }
 };
-
 exports.lookupUser = async (req, res) => {
   const { identifier } = req.query;
 

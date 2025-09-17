@@ -96,7 +96,26 @@ const createParticipant = async (participantData) => {
       client
     );
 
+    // 7️⃣ Get participant count registered in tournament
+    const res = await client.query(
+      `SELECT COUNT(*) AS count FROM participants WHERE tournament_id = $1`,
+      [tournament_id]
+    );
+
+    const participantCount = parseInt(res.rows[0].count, 10);
+
+    // 8️⃣ update tournament to set participants_count
+    await client.query(
+      `UPDATE tournaments SET participants_count = $1 WHERE id = $2`,
+      [participantCount, tournament_id]
+    );
+
     await client.query("COMMIT");
+    if (global.io) {
+      global.io
+        .to(`tournament_${participant.tournament_id}`)
+        .emit("participant-created", participant);
+    }
     return participant;
   } catch (error) {
     await client.query("ROLLBACK");
@@ -130,7 +149,15 @@ const updateParticipant = async (id, updateData) => {
   `;
 
   const result = await pool.query(query, values);
-  return result.rows[0];
+  const updatedParticipant = result.rows[0];
+
+  if (global.io && updatedParticipant) {
+    global.io
+      .to(`tournament_${updatedParticipant.tournament_id}`)
+      .emit("participant-updated", updatedParticipant);
+  }
+
+  return updatedParticipant;
 };
 
 const getAllParticipants = async () => {
@@ -165,9 +192,8 @@ const disqualifyParticipant = async (tournamentId, participantId) => {
       [participantId]
     );
 
-    if (!disqualifyRes.rows[0]) {
-      throw new Error("Participant not found");
-    }
+    const updatedParticipant = disqualifyRes.rows[0];
+    if (!updatedParticipant) throw new Error("Participant not found");
 
     // 2️⃣ Update tournament history status
     await client.query(
@@ -215,6 +241,12 @@ const disqualifyParticipant = async (tournamentId, participantId) => {
 
     await client.query("COMMIT");
 
+    if (global.io) {
+      global.io
+        .to(`tournament_${updatedParticipant.tournament_id}`)
+        .emit("participant-updated", updatedParticipant);
+    }
+
     return {
       disqualified: disqualifyRes.rows[0],
       updatedMatches: updatedCount,
@@ -233,6 +265,13 @@ const deleteParticipant = async (participantId) => {
   try {
     await client.query("BEGIN");
 
+    const participant = await pool.query(
+      `SELECT * FROM participants WHERE id = $1`,
+      [participantId]
+    );
+
+    if (!participant.rows[0]) throw new Error("Participant not found");
+
     // 1️⃣ Update history first
     await tournamentHelper.onDeleteParticipantUpdateTournamentHistory(
       participantId,
@@ -244,7 +283,28 @@ const deleteParticipant = async (participantId) => {
       participantId,
     ]);
 
+    // 3️⃣ Decrement participants_count in tournaments table
+    const tournamentRes = await client.query(
+      `UPDATE tournaments 
+   SET participants_count = GREATEST(participants_count - 1, 0)
+   WHERE id = $1
+   RETURNING *`,
+      [participant.rows[0].tournament_id]
+    );
+
+    const updatedTournament = tournamentRes.rows[0];
+
     await client.query("COMMIT");
+
+    if (global.io) {
+      global.io
+        .to(`tournament_${participant.rows[0].tournament_id}`)
+        .emit("participant-deleted", participant.rows[0]);
+        
+      global.io
+        .to(`tournament_${participant.rows[0].tournament_id}`)
+        .emit("tournament-updated", updatedTournament);
+    }
     return res.rowCount > 0;
   } catch (err) {
     await client.query("ROLLBACK");
