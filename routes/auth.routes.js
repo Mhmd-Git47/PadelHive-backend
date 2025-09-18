@@ -3,8 +3,8 @@ const router = express.Router();
 const authController = require("../controllers/auth.controller");
 const multer = require("multer");
 
+// ------------------ Multer setup ------------------
 const storage = multer.memoryStorage();
-
 const fileFilter = (req, file, cb) => {
   if (file.mimetype.startsWith("image/")) {
     cb(null, true);
@@ -12,25 +12,47 @@ const fileFilter = (req, file, cb) => {
     cb(new Error("Only image files are allowed!"), false);
   }
 };
-
 const upload = multer({ storage, fileFilter });
-// admin routes
+
+// ------------------ Admin Routes ------------------
 router.post("/register-admin", authController.registerAdm);
 router.post("/login-admin", authController.loginAdm);
 
-// user routes
+// ------------------ User Routes ------------------
+// Registration with optional profile image
 router.post("/register", upload.single("image_url"), authController.register);
 router.post("/login", authController.login);
+
+// User management
 router.get("/users", authController.getUsers);
 router.get("/user/:id", authController.getUserById);
 router.put("/user/:id", upload.single("image"), authController.updateUser);
 router.delete("/user/:id", authController.deleteUser);
-// GET /users/lookup?identifier=some@email.com
+
+// Lookup & Password management
 router.get("/lookup", authController.lookupUser);
 router.post("/forgot-password-otp", authController.forgotPasswordOtp);
 router.post("/reset-password-otp", authController.resetPasswordOtp);
 
-// verification email
+// ------------------ Email Verification ------------------
 router.get("/verify-email", authController.verifyEmail);
+router.post(
+  "/resend-email-verification",
+  authController.resendEmailVerification
+);
+
+// ------------------ SMS Registration Flow ------------------
+// Start SMS verification (optional image upload handled in pending registration)
+router.post(
+  "/register/sms/start",
+  // upload.single("image_url"),
+  authController.startRegistrationSms
+);
+
+// Verify SMS OTP
+router.post("/register/sms/verify", authController.verifyRegistrationSms);
+
+// Resend OTP
+router.post("/register/sms/resend", authController.resendSmsOtp);
 
 module.exports = router;

@@ -24,9 +24,11 @@ const sponsorRoutes = require("./routes/sponsor.routes");
 const reportRoutes = require("./routes/report.routes");
 const contactRoutes = require("./routes/contact.routes");
 const subscriptionRoutes = require("./routes/subscription.routes");
+const smsRoutes = require("./routes/sms.routes");
 
 // cron
 const tournamentCron = require("./cron/tournament.cron");
+require("./cron/user.cron");
 
 console.log("Current NODE_ENV:", process.env.NODE_ENV);
 
@@ -52,6 +54,9 @@ app.use("/api/sponsors", sponsorRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/contact", contactRoutes);
 app.use("/api/subscribe", subscriptionRoutes);
+
+// sms
+app.use("/api/sms", smsRoutes);
 
 // get images
 app.use("/api/images/users", express.static("images/users"));
@@ -95,6 +100,7 @@ const io = new Server(server, {
 
 global.io = io;
 
+// CRON
 // Attach io instance to cron job
 tournamentCron.setSocketInstance(io);
 
@@ -111,6 +117,11 @@ io.on("connection", (socket) => {
   socket.on("leaveTournament", (tournamentId) => {
     socket.leave(`tournament_${tournamentId}`);
     console.log(`📌 Client ${socket.id} left tournament_${tournamentId}`);
+  });
+
+  socket.on("watchEmailVerification", (email) => {
+    socket.join(`verify_${email}`);
+    console.log(`📌 Client ${socket.id} is watching email ${email}`);
   });
 
   socket.on("disconnect", () => {

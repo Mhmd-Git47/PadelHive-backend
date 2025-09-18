@@ -24,6 +24,9 @@ exports.loginAdm = async (req, res) => {
   }
 };
 
+// ----------------------------
+// Register user (initial, pending email verification)
+// ----------------------------
 exports.register = async (req, res) => {
   try {
     let {
@@ -42,8 +45,8 @@ exports.register = async (req, res) => {
       country_code,
     } = req.body;
 
-    // 1️⃣ Calculate ELO based on chosen category
-    let calculatedElo = 9000; // default
+    // Calculate ELO & category
+    let calculatedElo = 900; // default beginner
     let calculatedCategory = "D-";
 
     switch ((category || "").toLowerCase()) {
@@ -69,13 +72,13 @@ exports.register = async (req, res) => {
         break;
     }
 
-    // 2️⃣ Check frontend-provided elo_rate
+    // Ensure frontend did not tamper
     if (!elo_rate || Number(elo_rate) !== calculatedElo) {
-      elo_rate = calculatedElo; // override if mismatched
-      category = calculatedCategory; // ensure category matches elo
+      elo_rate = calculatedElo;
+      category = calculatedCategory;
     }
 
-    // 3️⃣ Handle profile image
+    // Handle profile image
     let image_url = null;
     if (req.file) {
       const filename = `user-${Date.now()}.webp`;
@@ -95,8 +98,8 @@ exports.register = async (req, res) => {
       image_url = filename;
     }
 
-    // 4️⃣ Register the user
-    const user = await authService.registerUser({
+    // Call service to create pending registration & send verification email
+    const pending = await authService.registerUser({
       first_name,
       last_name,
       email,
@@ -113,14 +116,19 @@ exports.register = async (req, res) => {
       country_code,
     });
 
-    res.status(201).json({ message: "User registered", user });
+    res.status(201).json({
+      message: "Registration pending. Please verify your email.",
+      pending_id: pending.pending_id,
+    });
   } catch (err) {
-    console.error("User register error:", err);
+    console.error("Register error:", err);
     res.status(400).json({ error: err.message });
   }
 };
 
-// users
+// ----------------------------
+// Login
+// ----------------------------
 exports.login = async (req, res) => {
   try {
     const result = await authService.loginUser(req.body);
@@ -130,14 +138,82 @@ exports.login = async (req, res) => {
   }
 };
 
+// ----------------------------
+// Email verification
+// ----------------------------
 exports.verifyEmail = async (req, res) => {
   try {
     const { token } = req.query;
-    const result = await authService.verifyAndInsertUser(token);
-    res
-      .status(201)
-      .json({ message: "Email verified and user registered", user: result });
+    const user = await authService.verifyAndInsertUser(token);
+    res.status(201).json({
+      message: "Email verified successfully",
+      user,
+    });
   } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
+// ----------------------------
+// Resend email verification
+// ----------------------------
+exports.resendEmailVerification = async (req, res) => {
+  try {
+    const { pending_id, email } = req.body;
+    const result = await authService.resendEmailVerification({
+      pending_id,
+      email,
+    });
+    res.status(200).json(result);
+  } catch (err) {
+    console.error("Resend email verification error:", err);
+    res.status(400).json({ error: err.message });
+  }
+};
+
+// ----------------------------
+// Start registration via SMS (OTP)
+// ----------------------------
+exports.startRegistrationSms = async (req, res) => {
+  try {
+    const { pending_id } = req.body;
+    const result = await authService.startRegistrationSms({ pending_id });
+    res.status(201).json(result);
+  } catch (err) {
+    console.error("Start SMS registration error:", err);
+    res.status(400).json({ error: err.message });
+  }
+};
+
+// ----------------------------
+// Resend SMS OTP
+// ----------------------------
+exports.resendSmsOtp = async (req, res) => {
+  try {
+    const { pending_id } = req.body;
+    const result = await authService.resendSmsOtp({ pending_id });
+    res.status(200).json(result);
+  } catch (err) {
+    console.error("Resend SMS OTP error:", err);
+    res.status(400).json({ error: err.message });
+  }
+};
+
+// ----------------------------
+// Verify registration via SMS (OTP)
+// ----------------------------
+exports.verifyRegistrationSms = async (req, res) => {
+  try {
+    const { pending_id, otp } = req.body;
+
+    if (!pending_id || !otp) {
+      return res.status(400).json({ error: "Missing pending_id or OTP" });
+    }
+
+    const user = await authService.verifyRegistrationSms(pending_id, otp);
+    res.status(201).json({ message: "Registration verified", user });
+  } catch (err) {
+    console.error("Verify SMS registration error:", err);
     res.status(400).json({ error: err.message });
   }
 };

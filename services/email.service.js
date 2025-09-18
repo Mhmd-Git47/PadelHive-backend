@@ -27,7 +27,7 @@ async function sendVerificationEmail(toEmail, token) {
                     style="
                       display: inline-block;
                       padding: 12px 24px;
-                      background-color: #22c55e;
+                      background-color: #1A365D;
                       color: #ffffff;
                       text-decoration: none;
                       font-weight: bold;
@@ -37,10 +37,6 @@ async function sendVerificationEmail(toEmail, token) {
                   >
                     Verify Email
                   </a>
-                  <p style="margin-top: 12px; font-size: 14px; color: #555;">
-                    Or click this link if the button doesn’t work: <br/>
-                    <a href="${verificationLink}" style="color: #22c55e;">${verificationLink}</a>
-                  </p>
                 </div>
               `;
 
