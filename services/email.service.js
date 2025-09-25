@@ -45,7 +45,6 @@ async function sendVerificationEmail(toEmail, token, userName) {
         overflow: hidden;
         background: #ffffff;
         border: 1px solid #e6e8eb;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.08);
         margin: 20px auto;
       }
       .header {
