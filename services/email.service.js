@@ -139,7 +139,7 @@ async function sendVerificationEmail(toEmail, token, userName) {
       <table role="presentation" class="container" cellspacing="0" cellpadding="0" border="0">
         <tr>
           <td class="header">
-            <img src="https://${brandDomain}/assets/images/icons/logonew.png" alt="${brandName} Logo">
+            <img src="https://${brandDomain}/assets/images/home/logonew.png" alt="${brandName} Logo">
           </td>
         </tr>
 
