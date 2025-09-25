@@ -121,8 +121,13 @@ exports.register = async (req, res) => {
       pending_id: pending.pending_id,
     });
   } catch (err) {
-    console.error("Register error:", err);
-    res.status(400).json({ error: err.message });
+    if (err.isOperational) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+
+    return res.status(500).json({
+      error: "Something went wrong. Please try again later.",
+    });
   }
 };
 

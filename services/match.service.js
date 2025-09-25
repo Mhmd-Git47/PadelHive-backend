@@ -230,6 +230,7 @@ async function processGroupRankings(match, groupMatches, client) {
   const labelToId = {};
   for (const row of spRes.rows) labelToId[row.participant_label] = row.id;
 
+
   for (let i = 0; i < qualifiedTeams.length; i++) {
     const label = `${groupLetter}${i + 1}`;
     const spId = labelToId[label];
@@ -248,6 +249,7 @@ async function handleFinalStage(match, client) {
     [match.id]
   );
   const nextMatch = nextMatchRes.rows[0];
+  console.log("next match: ", nextMatch.id);
 
   if (nextMatch) {
     const winnerStagePlayerId =
@@ -258,17 +260,29 @@ async function handleFinalStage(match, client) {
     if (!winnerStagePlayerId)
       throw new Error("Could not determine winner stage player ID");
 
-    if (nextMatch.id === nextMatch.player1_prereq_match_id) {
+    if (match.id === nextMatch.player1_prereq_match_id) {
       await client.query(
         `UPDATE matches SET player1_id = $1, stage_player1_id = $2 WHERE id = $3`,
         [match.winner_id, winnerStagePlayerId, nextMatch.id]
       );
-    } else if (nextMatch.id === nextMatch.player2_prereq_match_id) {
+    } else if (match.id === nextMatch.player2_prereq_match_id) {
       await client.query(
         `UPDATE matches SET player2_id = $1, stage_player2_id = $2 WHERE id = $3`,
         [match.winner_id, winnerStagePlayerId, nextMatch.id]
       );
     }
+    const updatedNextMatchRes = await client.query(
+      `SELECT * FROM matches WHERE id = $1`,
+      [nextMatch.id]
+    );
+    const updatedNextMatch = updatedNextMatchRes.rows[0];
+
+    if (global.io && updatedNextMatch) {
+      global.io
+        .to(`tournament_${updatedNextMatch.tournament_id}`)
+        .emit("match-updated", updatedNextMatch);
+    }
+
     return; // there’s still next match, tournament not finished
   }
 

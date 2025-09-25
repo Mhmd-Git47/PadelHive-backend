@@ -55,6 +55,31 @@ exports.updateStageParticipant = async (req, res) => {
   }
 };
 
+exports.saveKnockoutBracket = async (req, res) => {
+  const { tournamentId } = req.params;
+  const { draft } = req.body;
+
+  if (!draft || !draft.rounds) {
+    return res.status(400).json({ error: "Invalid draft format" });
+  }
+
+  try {
+    const matchIdMap = await stageServices.saveKnockoutBracket(
+      tournamentId,
+      draft
+    );
+    return res.json({
+      message: "Knockout bracket saved successfully",
+      matchIdMap,
+    });
+  } catch (err) {
+    console.error(`Failed saving knockout bracket: ${err}`);
+    return res
+      .status(500)
+      .json({ error: "Server error while saving knockout bracket." });
+  }
+};
+
 exports.getStageParticipantsByStageId = async (req, res) => {
   const { stageId } = req.params;
 

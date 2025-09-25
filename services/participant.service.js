@@ -14,7 +14,7 @@ const createParticipant = async (participantData) => {
 
     // 1️⃣ Fetch tournament to get max_allowed_elo_rate
     const tournamentRes = await client.query(
-      `SELECT id, max_allowed_elo_rate FROM tournaments WHERE id = $1`,
+      `SELECT id, max_allowed_elo_rate, tournament_type, tournament_format FROM tournaments WHERE id = $1`,
       [tournament_id]
     );
 

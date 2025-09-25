@@ -49,6 +49,7 @@ cron.schedule("* * * * *", async () => {
       } else {
         // ⏳ Deadline not reached → check participant count
         if (
+          t.max_allowed_teams !== null &&
           t.participants_count >= t.max_allowed_teams &&
           t.open_registration
         ) {

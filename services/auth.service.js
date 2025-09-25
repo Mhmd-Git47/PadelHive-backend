@@ -1,4 +1,5 @@
 const { sendVerificationEmail, sendEmail } = require("./email.service");
+const { AppError } = require("../utils/errors");
 
 const pool = require("../db");
 const bcrypt = require("bcrypt");
@@ -286,8 +287,9 @@ const registerUser = async ({
   if (existingPhoneNumber.rows.length > 0)
     errors.push("Phone Number already registered");
 
-  if (errors.length > 0) throw new Error(errors.join(", "));
-
+  if (errors.length > 0) {
+    throw new AppError(errors.join(", "), 400);
+  }
   // 2. Hash password
   const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -349,7 +351,7 @@ const registerUser = async ({
   const pending_id = insert.rows[0].id;
 
   // 5. Send verification email
-  await sendVerificationEmail(email, token);
+  await sendVerificationEmail(email, token, display_name);
 
   // 6. Return pending info
   return {
@@ -429,19 +431,21 @@ const resendEmailVerification = async ({ pending_id, email }) => {
   );
 
   // 6. Send the email
-  await sendVerificationEmail(pending.email, token);
+  await sendVerificationEmail(pending.email, token, pending.display_name);
 
   return { message: "Verification email resent successfully." };
 };
 
-const loginUser = async ({ email, password }) => {
-  const result = await pool.query("SELECT * FROM users WHERE email = $1", [
-    email,
-  ]);
+const loginUser = async ({ identifier, password }) => {
+  const result = await pool.query(
+    "SELECT * FROM users WHERE email = $1 OR display_name = $2",
+    [identifier, identifier]
+  );
   const user = result.rows[0];
+  console.log(user);
 
   if (!user) {
-    throw new Error("Invalid email or password!");
+    throw new Error("Invalid identifier or password!");
   }
 
   const valid = await bcrypt.compare(password, user.password);
@@ -550,14 +554,14 @@ const verifyAndInsertUser = async (token) => {
 
 const getUsers = async () => {
   const result =
-    await pool.query(`SELECT id, email, first_name, last_name, date_of_birth, gender, image_url, phone_number, nationality, address, created_at, updated_at, elo_rate, user_status, display_name, category 
+    await pool.query(`SELECT id, email, first_name, last_name, date_of_birth, gender, image_url, phone_number, nationality, address, created_at, updated_at, elo_rate, user_status, display_name, category, rank
      FROM users`);
   return result.rows;
 };
 
 const getUserById = async (userId) => {
   const result = await pool.query(
-    `SELECT id, email, first_name, last_name, date_of_birth, gender, image_url, phone_number, nationality, address, created_at, updated_at, elo_rate, user_status, display_name 
+    `SELECT id, email, first_name, last_name, date_of_birth, gender, image_url, phone_number, nationality, address, created_at, updated_at, elo_rate, user_status, display_name, rank 
      FROM users
      WHERE id = $1`,
     [userId]

@@ -59,107 +59,151 @@ async function updateEloForDoublesMatch(match, client) {
     return res.rows[0] || null;
   };
 
-  // Fetch participants for player1 and player2
-  const participant1Res = await client.query(
-    `SELECT padelhive_user1_id, padelhive_user2_id FROM participants WHERE id = $1`,
-    [match.player1_id]
-  );
-  const participant2Res = await client.query(
-    `SELECT padelhive_user1_id, padelhive_user2_id FROM participants WHERE id = $1`,
-    [match.player2_id]
-  );
+  await client.query("BEGIN"); // 🔒 start transaction
 
-  const p1 = participant1Res.rows[0];
-  const p2 = participant2Res.rows[0];
-
-  if (!p1 || !p2) {
-    console.warn(
-      `Participant record missing for player1_id: ${match.player1_id} or player2_id: ${match.player2_id}`
+  try {
+    // Fetch participants for player1 and player2
+    const participant1Res = await client.query(
+      `SELECT padelhive_user1_id, padelhive_user2_id FROM participants WHERE id = $1`,
+      [match.player1_id]
     );
-    return; // skip Elo update if participant missing
-  }
-
-  // Fetch users safely
-  const users = await Promise.all([
-    fetchUserSafe(p1.padelhive_user1_id),
-    fetchUserSafe(p1.padelhive_user2_id),
-    fetchUserSafe(p2.padelhive_user1_id),
-    fetchUserSafe(p2.padelhive_user2_id),
-  ]);
-
-  // Separate into teams and remove nulls
-  const team1Users = users.slice(0, 2).filter(Boolean);
-  const team2Users = users.slice(2, 4).filter(Boolean);
-
-  if (team1Users.length === 0 || team2Users.length === 0) {
-    console.warn(
-      "Not enough valid users to calculate Elo. Skipping Elo update."
+    const participant2Res = await client.query(
+      `SELECT padelhive_user1_id, padelhive_user2_id FROM participants WHERE id = $1`,
+      [match.player2_id]
     );
-    return;
+
+    const p1 = participant1Res.rows[0];
+    const p2 = participant2Res.rows[0];
+
+    if (!p1 || !p2) {
+      console.warn(
+        `Participant record missing for player1_id: ${match.player1_id} or player2_id: ${match.player2_id}`
+      );
+      await client.query("ROLLBACK");
+      return; // skip Elo update if participant missing
+    }
+
+    // Fetch users safely
+    const users = await Promise.all([
+      fetchUserSafe(p1.padelhive_user1_id),
+      fetchUserSafe(p1.padelhive_user2_id),
+      fetchUserSafe(p2.padelhive_user1_id),
+      fetchUserSafe(p2.padelhive_user2_id),
+    ]);
+
+    // Separate into teams and remove nulls
+    const team1Users = users.slice(0, 2).filter(Boolean);
+    const team2Users = users.slice(2, 4).filter(Boolean);
+
+    if (team1Users.length === 0 || team2Users.length === 0) {
+      console.warn(
+        "Not enough valid users to calculate Elo. Skipping Elo update."
+      );
+      await client.query("ROLLBACK");
+      return;
+    }
+
+    // Parse Elo safely and fallback baseline if invalid
+    const parseElo = (user) => {
+      const val = Number(user.elo_rate);
+      return isNaN(val) || val <= 0 ? 900 : val;
+    };
+
+    const team1Elo =
+      team1Users.reduce((sum, u) => sum + parseElo(u), 0) / team1Users.length;
+    const team2Elo =
+      team2Users.reduce((sum, u) => sum + parseElo(u), 0) / team2Users.length;
+
+    // Calculate match stats (existing helper)
+    const { margin, dominance } = getMatchStats(
+      match.scores_csv,
+      match.winner_id,
+      match.player1_id
+    );
+
+    // K factor based on round
+    const baseK = getKFactor(match.round_name);
+    const dominanceMultiplier = dominanceToMultiplier(dominance, {
+      impact: 0.5,
+      maxMultiplier: 1.75,
+    });
+    const K = baseK * dominanceMultiplier;
+
+    // Determine winning team
+    const team1Win =
+      Number(match.winner_id) === Number(match.player1_id) ? 1 : 0;
+
+    // Expected scores
+    const expectedTeam1 = 1 / (1 + Math.pow(10, (team2Elo - team1Elo) / 400));
+    const expectedTeam2 = 1 - expectedTeam1;
+
+    // Track affected user IDs
+    const affectedUserIds = [];
+
+    // Update Elo for team1
+    await Promise.all(
+      team1Users.map(async (user) => {
+        const newElo = parseElo(user) + K * (team1Win - expectedTeam1);
+        const newCategory = getCategoryByElo(newElo);
+        affectedUserIds.push(user.id);
+        await client.query(
+          `UPDATE users SET elo_rate = $1, category = $2 WHERE id = $3`,
+          [newElo, newCategory, user.id]
+        );
+      })
+    );
+
+    // Update Elo for team2
+    await Promise.all(
+      team2Users.map(async (user) => {
+        const newElo = parseElo(user) + K * (1 - team1Win - expectedTeam2);
+        const newCategory = getCategoryByElo(newElo);
+        affectedUserIds.push(user.id);
+        await client.query(
+          `UPDATE users SET elo_rate = $1, category = $2 WHERE id = $3`,
+          [newElo, newCategory, user.id]
+        );
+      })
+    );
+
+    // 🔑 Recalculate ranks ONLY for categories affected in this match
+    await client.query(
+      `
+      WITH affected_categories AS (
+        SELECT DISTINCT LEFT(category,1) AS base_cat
+        FROM users
+        WHERE id = ANY($1::uuid[])
+      ),
+      ranked AS (
+        SELECT id,
+              ROW_NUMBER() OVER (
+                PARTITION BY LEFT(category,1)
+                ORDER BY elo_rate DESC
+              ) AS new_rank
+        FROM users
+        WHERE LEFT(category,1) IN (SELECT base_cat FROM affected_categories)
+      )
+      UPDATE users u
+      SET rank = r.new_rank
+      FROM ranked r
+      WHERE u.id = r.id;
+
+      `,
+      [affectedUserIds]
+    );
+
+    await client.query("COMMIT"); // ✅ commit transaction
+
+    console.log(
+      `✅ Elo updated & ranks recalculated for categories of users: ${affectedUserIds.join(
+        ", "
+      )}`
+    );
+  } catch (err) {
+    await client.query("ROLLBACK"); // ❌ rollback if failure
+    console.error("❌ Failed to update Elo:", err.message);
+    throw err;
   }
-
-  // Parse Elo safely and fallback to 1000 if invalid
-  const parseElo = (user) => {
-    const val = Number(user.elo_rate);
-    return isNaN(val) || val <= 0 ? 900 : val;
-  };
-
-  const team1Elo =
-    team1Users.reduce((sum, u) => sum + parseElo(u), 0) / team1Users.length;
-  const team2Elo =
-    team2Users.reduce((sum, u) => sum + parseElo(u), 0) / team2Users.length;
-
-  // Calculate match stats (existing helper)
-  const { margin, dominance } = getMatchStats(
-    match.scores_csv,
-    match.winner_id,
-    match.player1_id
-  );
-
-  // K factor based on round
-  const baseK = getKFactor(match.round_name);
-  const dominanceMultiplier = dominanceToMultiplier(dominance, {
-    impact: 0.5,
-    maxMultiplier: 1.75,
-  });
-  const K = baseK * dominanceMultiplier;
-
-  // Determine winning team
-  const team1Win = Number(match.winner_id) === Number(match.player1_id) ? 1 : 0;
-
-  // Expected scores
-  const expectedTeam1 = 1 / (1 + Math.pow(10, (team2Elo - team1Elo) / 400));
-  const expectedTeam2 = 1 - expectedTeam1;
-
-  // Update Elo for team1
-  await Promise.all(
-    team1Users.map((user) => {
-      const newElo = parseElo(user) + K * (team1Win - expectedTeam1);
-      const newCategory = getCategoryByElo(newElo);
-      return client.query(
-        `UPDATE users SET elo_rate = $1, category = $2 WHERE id = $3`,
-        [newElo, newCategory, user.id]
-      );
-    })
-  );
-
-  // Update Elo for team2
-  await Promise.all(
-    team2Users.map((user) => {
-      const newElo = parseElo(user) + K * (1 - team1Win - expectedTeam2);
-      const newCategory = getCategoryByElo(newElo);
-      return client.query(
-        `UPDATE users SET elo_rate = $1, category = $2 WHERE id = $3`,
-        [newElo, newCategory, user.id]
-      );
-    })
-  );
-
-  console.log(
-    `Elo updated: Team1 [${team1Users.map(
-      (u) => u.id
-    )}] Team2 [${team2Users.map((u) => u.id)}]`
-  );
 }
 
 function getCategoryByElo(eloRate) {
@@ -179,7 +223,7 @@ function getCategoryByElo(eloRate) {
     category = "A";
     baseElo = 1350;
   } else {
-    return "A+"; 
+    return "A+";
   }
 
   const diff = eloRate - baseElo;

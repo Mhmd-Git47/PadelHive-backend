@@ -19,6 +19,13 @@ const createInitialStagesForTournament = async (
     VALUES ($1, 'Final Stage', 'elimination', 1, false, NOW());`,
       [tournamentId]
     );
+  } else if (tournamentFormat === "single") {
+    await client.query(
+      `INSERT INTO stages (tournament_id, name, type, order_index, is_current, created_at)
+            VALUES ($1, 'Final Stage', 'single', 0, true, NOW());
+        `,
+      [tournamentId]
+    );
   }
 };
 
@@ -378,6 +385,130 @@ const updateStageParticipant = async (id, updateData) => {
   return result.rows[0];
 };
 
+// when confirming participants, save them
+const saveKnockoutBracket = async (tournamentId, draft, clientt) => {
+  const client = clientt || (await pool.connect());
+
+  try {
+    await client.query("BEGIN");
+
+    // --- Get Final Stage ---
+    const stages = await getStagesByTournamentId(tournamentId);
+    const finalStage = stages.find((s) => s.name === "Final Stage");
+    if (!finalStage)
+      throw new Error(
+        `Final Stage not found for tournament ID ${tournamentId}`
+      );
+    const stageId = finalStage.id;
+
+    // --- Insert stage_participants for real participants ---
+    const participantToStageId = {};
+    for (const round of draft.rounds) {
+      for (const match of round.matches) {
+        for (const side of ["player1", "player2"]) {
+          const p = match[side];
+          if (p && p.id && !participantToStageId[p.id]) {
+            const res = await client.query(
+              `INSERT INTO stage_participants (stage_id, participant_id)
+               VALUES ($1, $2)
+               ON CONFLICT (stage_id, participant_id) DO NOTHING
+               RETURNING id`,
+              [stageId, p.id]
+            );
+
+            participantToStageId[p.id] =
+              res.rows[0]?.id ||
+              (
+                await client.query(
+                  `SELECT id FROM stage_participants WHERE stage_id = $1 AND participant_id = $2 LIMIT 1`,
+                  [stageId, p.id]
+                )
+              ).rows[0].id;
+          }
+        }
+      }
+    }
+
+    // ---- Build matches round by round ----------
+    let prevRoundMatchIds = []; // IDs of previous round matches
+
+    for (let r = 0; r < draft.rounds.length; r++) {
+      const round = draft.rounds[r];
+      const roundNumber = round.round;
+      const roundName = getRoundName(roundNumber, draft.rounds.length);
+
+      const currentRoundMatchIds = [];
+
+      for (let m = 0; m < round.matches.length; m++) {
+        const match = round.matches[m];
+
+        let p1_stage = match.player1
+          ? participantToStageId[match.player1.id]
+          : null;
+        let p2_stage = match.player2
+          ? participantToStageId[match.player2.id]
+          : null;
+        let p1_prereq = null;
+        let p2_prereq = null;
+
+        if (r === 1) {
+          // ROUND 2: assign prereqs only for player2 if previous round exists
+          if (!match.player2 && prevRoundMatchIds[m] != null) {
+            p2_prereq = prevRoundMatchIds[m]; // winner of corresponding round 1 match
+            p2_stage = null;
+          }
+          // player1 is the seed who had bye, keep as stage_player1_id
+        } else if (r > 1) {
+          // Later rounds: both sides may be winners of previous matches
+          const prevIndex = m * 2;
+          p1_prereq = prevRoundMatchIds[prevIndex] || null;
+          p2_prereq = prevRoundMatchIds[prevIndex + 1] || null;
+          p1_stage = null;
+          p2_stage = null;
+        }
+
+        const identifier = `${match.player1?.name || "TBD"} vs ${
+          match.player2?.name || "TBD"
+        } (${roundName})`;
+
+        const res = await client.query(
+          `INSERT INTO matches
+             (stage_id, tournament_id,
+              stage_player1_id, stage_player2_id,
+              player1_prereq_match_id, player2_prereq_match_id,
+              round, state, identifier, created_at, updated_at, round_name)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8,NOW(),NOW(),$9)
+           RETURNING id`,
+          [
+            stageId,
+            tournamentId,
+            p1_stage,
+            p2_stage,
+            p1_prereq,
+            p2_prereq,
+            roundNumber,
+            identifier,
+            roundName,
+          ]
+        );
+
+        currentRoundMatchIds.push(res.rows[0].id);
+      }
+
+      prevRoundMatchIds = currentRoundMatchIds;
+    }
+
+    await client.query("COMMIT");
+    console.log("✅ Knockout bracket saved successfully!");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("❌ Error saving knockout bracket:", err);
+    throw err;
+  } finally {
+    if (!clientt) client.release();
+  }
+};
+
 const getStageParticipantsByStageId = async (stageId) => {
   const result = await pool.query(
     `SELECT * FROM stage_participants WHERE stage_id = $1`,
@@ -406,4 +537,5 @@ module.exports = {
   getStageParticipantsByStageId,
   updateStageParticipant,
   deleteStagesByTournamentId,
+  saveKnockoutBracket,
 };

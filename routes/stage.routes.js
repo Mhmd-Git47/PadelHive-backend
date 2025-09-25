@@ -16,11 +16,14 @@ router.post(
   "/generate-placeholders",
   stageController.generateFinalStagePlaceholders
 );
+router.post(
+  "/:tournamentId/knockout-bracket",
+  stageController.saveKnockoutBracket
+);
 
 router.put("/stage-participant", stageController.updateStageParticipant);
 
 module.exports = router;
-
 
 // router.get("/tournament/:tournamentId", stageController.getStagesByTournamentId);
 // router.get("/:stageId/participants", stageController.getStageParticipantsByStageId);

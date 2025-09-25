@@ -16,47 +16,163 @@ const transporter = nodemailer.createTransport({
   debug: true,
 });
 
-async function sendVerificationEmail(toEmail, token) {
+async function sendVerificationEmail(toEmail, token, userName) {
+  const brandName = "PadelHive";
+  const brandDomain = "padelhivelb.com";
   const verificationLink = `${process.env.FRONTEND_URL}/verify-email?token=${token}`;
+  const currentYear = new Date().getFullYear();
 
   const html = `
-                <div style="font-family: Arial, sans-serif; font-size: 16px; color: #333;">
-                  <p>Click the button below to verify your email:</p>
-                  <a 
-                    href="${verificationLink}" 
-                    style="
-                      display: inline-block;
-                      padding: 12px 24px;
-                      background-color: #1A365D;
-                      color: #ffffff;
-                      text-decoration: none;
-                      font-weight: bold;
-                      border-radius: 6px;
-                      margin-top: 12px;
-                    "
-                  >
-                    Verify Email
-                  </a>
-                </div>
-              `;
+  <!doctype html>
+  <html lang="en" xmlns:v="urn:schemas-microsoft-com:vml">
+  <head>
+    <meta charset="utf-8">
+    <meta name="x-apple-disable-message-reformatting">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Verify your email</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        background: #f5f7f9;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+      }
+      .container {
+        width: 600px;
+        max-width: 600px;
+        border-radius: 12px;
+        overflow: hidden;
+        background: #ffffff;
+        border: 1px solid #e6e8eb;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+        margin: 20px auto;
+      }
+      .header {
+        padding: 30px 24px;
+        background: #1e293b;
+        text-align: center;
+      }
+      .header img {
+        max-width: 180px;
+        height: auto;
+        background: transparent;
+      }
+      .content {
+        padding: 36px 30px;
+        color: #334155;
+      }
+      .content h1 {
+        margin: 0 0 10px 0;
+        color: #0f172a;
+        font-size: 28px;
+        line-height: 36px;
+        font-weight: 700;
+      }
+      .content p {
+        margin: 0 0 16px 0;
+        font-size: 16px;
+        line-height: 24px;
+      }
+      .btn {
+        background: #0f172a;
+        border-radius: 8px;
+        color: #ffffff !important;
+        display: inline-block;
+        font-size: 16px;
+        font-weight: bold;
+        line-height: 52px;
+        text-align: center;
+        text-decoration: none;
+        width: 280px;
+        max-width: 100%;
+        margin: 16px 0;
+        transition: background 0.3s ease;
+      }
+      .btn:hover {
+        background: #334155;
+      }
+      .note {
+        margin-top: 24px;
+        color: #6b7280;
+        font-size: 13px;
+        line-height: 20px;
+      }
+      .footer {
+        text-align: center;
+        padding: 24px 30px;
+        font-size: 12px;
+        color: #94a3b8;
+        border-top: 1px solid #e2e8f0;
+      }
+      .footer a {
+        color: #94a3b8;
+        text-decoration: none;
+        margin: 0 5px;
+      }
+      @media only screen and (max-width:620px) {
+        .container {
+          width: 100% !important;
+          border-radius: 0;
+          box-shadow: none;
+        }
+        .content {
+          padding: 24px 20px !important;
+        }
+        .header {
+          padding: 20px 20px;
+        }
+        .footer {
+          padding: 20px;
+        }
+      }
+    </style>
+  </head>
 
-  await sendEmail({ to: toEmail, subject: "Please verify your email", html });
+  <body>
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
+      Confirm your email address to get started with ${brandName}.
+    </div>
 
-  // const mailOptions = {
-  //   from: `"PadelHive" <${process.env.ZOHO_EMAIL}>`,
-  //   to: toEmail,
-  //   subject: "Please verify your email",
-  //   html: `<p>Click the link below to verify your email:</p>
-  //          <a href="${verificationLink}">${verificationLink}</a>`,
-  // };
+    <center style="width:100%;">
+      <div style="height:30px;line-height:30px;font-size:30px;">&nbsp;</div>
+      <table role="presentation" class="container" cellspacing="0" cellpadding="0" border="0">
+        <tr>
+          <td class="header">
+            <img src="https://${brandDomain}/assets/images/icons/logonew.png" alt="${brandName} Logo">
+          </td>
+        </tr>
 
-  // try {
-  //   await transporter.sendMail(mailOptions);
-  //   console.log("Verification email sent to:", toEmail);
-  // } catch (error) {
-  //   console.error("Error sending email:", error);
-  //   throw new Error("Failed to send verification email");
-  // }
+        <tr>
+          <td class="content">
+            <h1>Verify your email</h1>
+            <p>Hi ${userName},</p>
+            <p>Thanks for signing up for ${brandName}! To activate your account, please click the button below to verify your email address.</p>
+            <div style="text-align:center;">
+              <a href="${verificationLink}" class="btn">Confirm Email Address</a>
+            </div>
+            <p class="note">This link will expire in <strong>10 minutes</strong>. If you did not sign up for ${brandName}, you can safely ignore this email.</p>
+          </td>
+        </tr>
+
+        <tr>
+          <td class="footer">
+            © ${currentYear} ${brandName} · 
+            <a href="https://${brandDomain}">${brandDomain}</a>
+          </td>
+        </tr>
+      </table>
+      <div style="height:30px;line-height:30px;font-size:30px;">&nbsp;</div>
+    </center>
+  </body>
+  </html>
+  `;
+
+  await sendEmail({
+    to: toEmail,
+    subject: "Please verify your email",
+    html,
+  });
 }
 
 async function sendEmail({ to, subject, html, text }) {
