@@ -3,6 +3,12 @@ const pool = require("../db");
 const paymentService = require("./payments.service");
 const matchHelper = require("../helpers/match.helper");
 const tournamentHelper = require("../helpers/tournament.helper");
+const {
+  sendDisqualificationEmail,
+  sendTournamentJoinEmail,
+  sendTournamentLeftEmail,
+} = require("../helpers/email.helper");
+const { AppError } = require("../utils/errors");
 
 const createParticipant = async (participantData) => {
   const { tournament_id, name, comment } = participantData;
@@ -19,7 +25,7 @@ const createParticipant = async (participantData) => {
     );
 
     if (tournamentRes.rows.length === 0) {
-      throw new Error("Tournament not found");
+      throw new AppError("Tournament not found", 404);
     }
 
     const tournament = tournamentRes.rows[0];
@@ -36,8 +42,9 @@ const createParticipant = async (participantData) => {
       );
 
       if (invalidUsers.length > 0) {
-        throw new Error(
-          `Cannot register: user(s) exceed tournament max Elo of ${tournament.max_allowed_elo_rate}`
+        throw new AppError(
+          `Cannot register: user(s) exceed tournament max Elo of ${tournament.max_allowed_elo_rate}`,
+          400
         );
       }
     }
@@ -58,11 +65,7 @@ const createParticipant = async (participantData) => {
 
     if (checkRes.rows.length > 0) {
       const registeredUsers = checkRes.rows.map((r) => r.user_id);
-      throw new Error(
-        `Cannot register: user(s) already registered - ${registeredUsers.join(
-          ", "
-        )}`
-      );
+      throw new AppError(`Cannot register: user(s) already registered.`, 400);
     }
 
     // 4️⃣ Insert participant normally
@@ -116,6 +119,25 @@ const createParticipant = async (participantData) => {
         .to(`tournament_${participant.tournament_id}`)
         .emit("participant-created", participant);
     }
+
+    // --- SEND JOIN TOURNAMENT EMAIL ---
+    const userIds = [
+      participantData.padelhive_user1_id,
+      participantData.padelhive_user2_id,
+      participantData.user_id,
+    ].filter(Boolean);
+
+    if (userIds.length > 0) {
+      const usersRes = await client.query(
+        "SELECT id, display_name, email FROM users WHERE id = ANY($1::uuid[])",
+        [userIds]
+      );
+      const users = usersRes.rows;
+      for (const user of users) {
+        sendTournamentJoinEmail(user, tournament);
+      }
+    }
+
     return participant;
   } catch (error) {
     await client.query("ROLLBACK");
@@ -127,7 +149,7 @@ const createParticipant = async (participantData) => {
 
 const updateParticipant = async (id, updateData) => {
   if (Object.keys(updateData).length === 0) {
-    throw new Error(`No Fields provided to update`);
+    throw new AppError(`No Fields provided to update`, 400);
   }
 
   const fields = [];
@@ -183,19 +205,33 @@ const getParticipantsByTournamentId = async (tournamentId) => {
 
 const disqualifyParticipant = async (tournamentId, participantId) => {
   const client = await pool.connect();
+  let updatedParticipant,
+    tournament,
+    updatedCount = 0;
+  let users = [];
+
   try {
     await client.query("BEGIN");
 
-    // 1️⃣ Mark participant as disqualified
+    // 1️⃣ Fetch tournament
+    const tournamentRes = await client.query(
+      `SELECT id, name FROM tournaments WHERE id = $1`,
+      [tournamentId]
+    );
+    tournament = tournamentRes.rows[0];
+    if (!tournament) throw new AppError("Tournament not found", 404);
+
+    // 2️⃣ Mark participant as disqualified
     const disqualifyRes = await client.query(
-      `UPDATE participants SET is_disqualified = true, updated_at = NOW() WHERE id = $1 RETURNING *`,
+      `UPDATE participants 
+       SET is_disqualified = true, updated_at = NOW() 
+       WHERE id = $1 RETURNING *`,
       [participantId]
     );
+    updatedParticipant = disqualifyRes.rows[0];
+    if (!updatedParticipant) throw new AppError("Participant not found", 404);
 
-    const updatedParticipant = disqualifyRes.rows[0];
-    if (!updatedParticipant) throw new Error("Participant not found");
-
-    // 2️⃣ Update tournament history status
+    // 3️⃣ Update history
     await client.query(
       `UPDATE user_tournaments_history
        SET status = 'disqualified', updated_at = NOW()
@@ -203,17 +239,16 @@ const disqualifyParticipant = async (tournamentId, participantId) => {
       [participantId]
     );
 
-    // 3️⃣ Get all matches of this participant in this tournament
+    // 4️⃣ Get matches
     const matchesRes = await client.query(
-      `SELECT * FROM matches WHERE tournament_id = $1 AND (player1_id = $2 OR player2_id = $2)`,
+      `SELECT * FROM matches 
+       WHERE tournament_id = $1 
+       AND (player1_id = $2 OR player2_id = $2)`,
       [tournamentId, participantId]
     );
 
-    const matches = matchesRes.rows;
-    let updatedCount = 0;
-
-    // 4️⃣ Iterate matches & force opponent win
-    for (const match of matches) {
+    // 5️⃣ Force opponent wins
+    for (const match of matchesRes.rows) {
       let winnerId = null;
       let scores = "6-0";
 
@@ -225,39 +260,62 @@ const disqualifyParticipant = async (tournamentId, participantId) => {
         scores = "6-0";
       }
 
-      if (!winnerId) {
-        continue;
+      if (winnerId) {
+        await matchHelper.updateMatchHelper(match.id, {
+          winner_id: winnerId,
+          scores_csv: scores,
+          state: "completed",
+        });
+        updatedCount++;
       }
-
-      // ✅ Use updateMatch so Elo, groups, progression logic runs
-      await matchHelper.updateMatchHelper(match.id, {
-        winner_id: winnerId,
-        scores_csv: scores,
-        state: "completed",
-      });
-
-      updatedCount++;
     }
+
+    // 6️⃣ Fetch users linked to this participant
+    const usersRes = await client.query(
+      `SELECT DISTINCT id, name, email 
+       FROM users 
+       WHERE id = $1 OR id = $2`,
+      [
+        updatedParticipant.padelhive_user1_id,
+        updatedParticipant.padelhive_user2_id,
+      ]
+    );
+    users = usersRes.rows;
 
     await client.query("COMMIT");
-
-    if (global.io) {
-      global.io
-        .to(`tournament_${updatedParticipant.tournament_id}`)
-        .emit("participant-updated", updatedParticipant);
-    }
-
-    return {
-      disqualified: disqualifyRes.rows[0],
-      updatedMatches: updatedCount,
-    };
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error("Error disqualifying participant: ", err.message);
+    console.error("Error disqualifying participant:", err.message);
     throw err;
   } finally {
     client.release();
   }
+
+  // 7️⃣ Send disqualification emails (outside transaction)
+  try {
+    for (const user of users) {
+      await sendDisqualificationEmail(
+        user,
+        tournament,
+        "Violation of tournament rules"
+      );
+    }
+  } catch (err) {
+    console.error("Error sending disqualification emails:", err);
+    // not throwing, since DB updates already committed
+  }
+
+  // 8️⃣ Emit update event
+  if (global.io) {
+    global.io
+      .to(`tournament_${updatedParticipant.tournament_id}`)
+      .emit("participant-updated", updatedParticipant);
+  }
+
+  return {
+    disqualified: updatedParticipant,
+    updatedMatches: updatedCount,
+  };
 };
 
 const deleteParticipant = async (participantId) => {
@@ -270,7 +328,7 @@ const deleteParticipant = async (participantId) => {
       [participantId]
     );
 
-    if (!participant.rows[0]) throw new Error("Participant not found");
+    if (!participant.rows[0]) throw new AppError("Participant not found", 404);
 
     // 1️⃣ Update history first
     await tournamentHelper.onDeleteParticipantUpdateTournamentHistory(
@@ -286,9 +344,9 @@ const deleteParticipant = async (participantId) => {
     // 3️⃣ Decrement participants_count in tournaments table
     const tournamentRes = await client.query(
       `UPDATE tournaments 
-   SET participants_count = GREATEST(participants_count - 1, 0)
-   WHERE id = $1
-   RETURNING *`,
+        SET participants_count = GREATEST(participants_count - 1, 0)
+        WHERE id = $1
+        RETURNING *`,
       [participant.rows[0].tournament_id]
     );
 
@@ -300,11 +358,29 @@ const deleteParticipant = async (participantId) => {
       global.io
         .to(`tournament_${participant.rows[0].tournament_id}`)
         .emit("participant-deleted", participant.rows[0]);
-        
+
       global.io
         .to(`tournament_${participant.rows[0].tournament_id}`)
         .emit("tournament-updated", updatedTournament);
     }
+
+    const userIds = [
+      participant.rows[0].padelhive_user1_id,
+      participant.rows[0].padelhive_user2_id,
+      participant.rows[0].user_id,
+    ].filter(Boolean);
+
+    if (userIds.length > 0) {
+      const usersRes = await client.query(
+        `SELECT id, name, email FROM users WHERE id = ANY($1::uuid[])`,
+        [userIds]
+      );
+      const users = usersRes.rows;
+      for (const user of users) {
+        await sendTournamentLeftEmail(user, updatedTournament);
+      }
+    }
+
     return res.rowCount > 0;
   } catch (err) {
     await client.query("ROLLBACK");

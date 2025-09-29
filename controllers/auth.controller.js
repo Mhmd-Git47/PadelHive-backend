@@ -3,7 +3,7 @@ const path = require("path");
 const fs = require("fs");
 const sharp = require("sharp");
 
-exports.registerAdm = async (req, res) => {
+exports.registerAdm = async (req, res, next) => {
   try {
     console.log("Register request body:", req.body);
     const user = await authService.registerAdmin(req.body);
@@ -11,23 +11,23 @@ exports.registerAdm = async (req, res) => {
     res.status(201).json({ message: "User registered", user });
   } catch (err) {
     console.error("Register error:", err);
-    res.status(400).json({ error: err.message });
+    next(err);
   }
 };
 
-exports.loginAdm = async (req, res) => {
+exports.loginAdm = async (req, res, next) => {
   try {
     const token = await authService.loginAdmin(req.body);
     res.json({ token });
   } catch (err) {
-    res.status(401).json({ error: err.message });
+    next(err);
   }
 };
 
 // ----------------------------
 // Register user (initial, pending email verification)
 // ----------------------------
-exports.register = async (req, res) => {
+exports.register = async (req, res, next) => {
   try {
     let {
       first_name,
@@ -121,32 +121,26 @@ exports.register = async (req, res) => {
       pending_id: pending.pending_id,
     });
   } catch (err) {
-    if (err.isOperational) {
-      return res.status(err.statusCode).json({ error: err.message });
-    }
-
-    return res.status(500).json({
-      error: "Something went wrong. Please try again later.",
-    });
+    next(err);
   }
 };
 
 // ----------------------------
 // Login
 // ----------------------------
-exports.login = async (req, res) => {
+exports.login = async (req, res, next) => {
   try {
     const result = await authService.loginUser(req.body);
     res.status(200).json(result);
   } catch (err) {
-    res.status(401).json({ error: err.message });
+    next(err);
   }
 };
 
 // ----------------------------
 // Email verification
 // ----------------------------
-exports.verifyEmail = async (req, res) => {
+exports.verifyEmail = async (req, res, next) => {
   try {
     const { token } = req.query;
     const user = await authService.verifyAndInsertUser(token);
@@ -155,14 +149,14 @@ exports.verifyEmail = async (req, res) => {
       user,
     });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    next(err);
   }
 };
 
 // ----------------------------
 // Resend email verification
 // ----------------------------
-exports.resendEmailVerification = async (req, res) => {
+exports.resendEmailVerification = async (req, res, next) => {
   try {
     const { pending_id, email } = req.body;
     const result = await authService.resendEmailVerification({
@@ -172,42 +166,42 @@ exports.resendEmailVerification = async (req, res) => {
     res.status(200).json(result);
   } catch (err) {
     console.error("Resend email verification error:", err);
-    res.status(400).json({ error: err.message });
+    next(err);
   }
 };
 
 // ----------------------------
 // Start registration via SMS (OTP)
 // ----------------------------
-exports.startRegistrationSms = async (req, res) => {
+exports.startRegistrationSms = async (req, res, next) => {
   try {
     const { pending_id } = req.body;
     const result = await authService.startRegistrationSms({ pending_id });
     res.status(201).json(result);
   } catch (err) {
     console.error("Start SMS registration error:", err);
-    res.status(400).json({ error: err.message });
+    next(err);
   }
 };
 
 // ----------------------------
 // Resend SMS OTP
 // ----------------------------
-exports.resendSmsOtp = async (req, res) => {
+exports.resendSmsOtp = async (req, res, next) => {
   try {
     const { pending_id } = req.body;
     const result = await authService.resendSmsOtp({ pending_id });
     res.status(200).json(result);
   } catch (err) {
     console.error("Resend SMS OTP error:", err);
-    res.status(400).json({ error: err.message });
+    next(err);
   }
 };
 
 // ----------------------------
 // Verify registration via SMS (OTP)
 // ----------------------------
-exports.verifyRegistrationSms = async (req, res) => {
+exports.verifyRegistrationSms = async (req, res, next) => {
   try {
     const { pending_id, otp } = req.body;
 
@@ -219,11 +213,11 @@ exports.verifyRegistrationSms = async (req, res) => {
     res.status(201).json({ message: "Registration verified", user });
   } catch (err) {
     console.error("Verify SMS registration error:", err);
-    res.status(400).json({ error: err.message });
+    next(err);
   }
 };
 
-exports.getUsers = async (req, res) => {
+exports.getUsers = async (req, res, next) => {
   try {
     const result = await authService.getUsers();
     res.json(result);
@@ -232,20 +226,17 @@ exports.getUsers = async (req, res) => {
   }
 };
 
-exports.getUserById = async (req, res) => {
+exports.getUserById = async (req, res, next) => {
   try {
     const user = await authService.getUserById(req.params.id);
     res.json(user);
   } catch (err) {
-    if (err.message === "User not found") {
-      return res.status(404).json({ error: err.message });
-    }
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 };
 
 const IMAGE_UPLOAD_PATH = path.join(__dirname, "..", "images/users");
-exports.updateUser = async (req, res) => {
+exports.updateUser = async (req, res, next) => {
   try {
     const userId = req.params.id;
     let newImageName = req.body.existingImageName || null;
@@ -292,10 +283,10 @@ exports.updateUser = async (req, res) => {
     res.json(updatedUser);
   } catch (err) {
     console.error("Update user error:", err);
-    res.status(400).json({ error: err.message });
+    next(err);
   }
 };
-exports.lookupUser = async (req, res) => {
+exports.lookupUser = async (req, res, next) => {
   const { identifier } = req.query;
 
   if (!identifier) {
@@ -307,11 +298,11 @@ exports.lookupUser = async (req, res) => {
 
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: "Server error" });
+    next(err);
   }
 };
 
-exports.deleteUser = async (req, res) => {
+exports.deleteUser = async (req, res, next) => {
   const { id } = req.params;
   if (!id) {
     return res.status(400).json({ error: "Missing User Id" });
@@ -321,21 +312,21 @@ exports.deleteUser = async (req, res) => {
     const result = await authService.deleteUser(id);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: "Error deleting user" });
+    next(err);
   }
 };
 
-exports.forgotPasswordOtp = async (req, res) => {
+exports.forgotPasswordOtp = async (req, res, next) => {
   try {
     const { email } = req.body;
     const result = await authService.forgotPasswordOtp(email);
     res.json(result);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    next(err);
   }
 };
 
-exports.resetPasswordOtp = async (req, res) => {
+exports.resetPasswordOtp = async (req, res, next) => {
   try {
     const { email, otp, newPassword } = req.body;
     const result = await authService.resetPasswordWithOtp({
@@ -345,6 +336,6 @@ exports.resetPasswordOtp = async (req, res) => {
     });
     res.json(result);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    next(err);
   }
 };

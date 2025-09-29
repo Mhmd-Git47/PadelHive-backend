@@ -12,7 +12,7 @@ const submitContactForm = async (req, res) => {
     }
 
     // you can configure this in env variables
-    const to = process.env.CONTACT_RECEIVER_EMAIL || "support@padelhivelb.com";
+    const to = process.env.ZOHO_CONTACT_EMAIL;
 
     await sendContactEmail({ to, name, email, phone, message });
 

@@ -1,7 +1,6 @@
 function checkMatchesCompleted(matches, groupId) {
   const groupMatches = matches.filter((match) => match.group_id === groupId);
   if (groupMatches.length === 0) {
-    console.log("No matches found for the group: ", groupId);
     return false;
   }
 
@@ -349,14 +348,10 @@ async function addMatchToUserHistory(match, client) {
           match.completed_at,
         ]
       );
-      console.log(
-        `✅ Inserted match history for user ${uid}, match ${match.id}`
-      );
     }
   };
   await insertHistory(p1, match.winner_id === p1);
   await insertHistory(p2, match.winner_id === p2);
-  console.log("✅ Match history recorded.");
 }
 
 module.exports = {

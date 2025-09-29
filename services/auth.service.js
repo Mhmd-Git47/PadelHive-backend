@@ -10,6 +10,11 @@ const crypto = require("crypto");
 const { generateOtp, hashOtp, verifyOtp } = require("../utils/otp");
 const sharp = require("sharp");
 const { sendSms } = require("../services/twilio.service");
+const {
+  sendWelcomeEmail,
+  sendPasswordResetSuccessEmail,
+  sendPasswordResetOtpEmail,
+} = require("../helpers/email.helper");
 
 const registerAdmin = async ({
   username,
@@ -30,10 +35,10 @@ const loginAdmin = async ({ username, password }) => {
     username,
   ]);
   const user = result.rows[0];
-  if (!user) throw new Error("Admin not found");
+  if (!user) throw new AppError("Admin not found", 401);
 
   const match = await bcrypt.compare(password, user.password);
-  if (!match) throw new Error("Invalid credentials");
+  if (!match) throw new AppError("Invalid credentials", 401);
 
   const token = jwt.sign(
     {
@@ -54,7 +59,7 @@ const updateAdmin = async (id, updatedData, clientt) => {
   const isClientProvided = !!clientt;
 
   if (Object.keys(updatedData).length === 0) {
-    throw new Error(`No fields provided to update`);
+    throw new AppError(`No fields provided to update`, 401);
   }
 
   const fields = [];
@@ -87,7 +92,7 @@ const updateAdmin = async (id, updatedData, clientt) => {
     return result.rows[0];
   } catch (err) {
     await client.query("ROLLBACK");
-    throw err;
+    throw new AppError("Error while updating admin", 500);
   } finally {
     if (!isClientProvided) {
       client.release();
@@ -117,7 +122,8 @@ const startRegistrationSms = async (payload) => {
       "SELECT * FROM pending_registrations WHERE id = $1",
       [pending_id]
     );
-    if (!r.rows.length) throw new Error("Pending registration not found");
+    if (!r.rows.length)
+      throw new AppError("Pending registration not found", 401);
 
     await pool.query(
       `UPDATE pending_registrations
@@ -138,17 +144,17 @@ const startRegistrationSms = async (payload) => {
 };
 
 const resendSmsOtp = async ({ pending_id }) => {
-  if (!pending_id) throw new Error("Missing pending_id");
+  if (!pending_id) throw new AppError("Missing pending_id", 401);
 
   const r = await pool.query(
     "SELECT * FROM pending_registrations WHERE id = $1",
     [pending_id]
   );
-  if (!r.rows.length) throw new Error("Pending registration not found");
+  if (!r.rows.length) throw new AppError("Pending registration not found", 401);
 
   const pending = r.rows[0];
 
-  if (pending.phone_verified) throw new Error("Phone already verified");
+  if (pending.phone_verified) throw new AppError("Phone already verified", 401);
 
   const now = new Date();
   const OTP_MAX_SENDS = 3;
@@ -165,8 +171,9 @@ const resendSmsOtp = async ({ pending_id }) => {
   }
 
   if (otpSentCount >= OTP_MAX_SENDS) {
-    throw new Error(
-      `Maximum OTP resend reached. Please wait ${OTP_WAIT_MINUTES} minutes before trying again.`
+    throw new AppError(
+      `Maximum OTP resend reached. Please wait ${OTP_WAIT_MINUTES} minutes before trying again.`,
+      429
     );
   }
 
@@ -200,19 +207,20 @@ const verifyRegistrationSms = async (pending_id, otp) => {
     [pending_id]
   );
 
-  if (rows.length === 0) throw new Error("Pending registration not found");
+  if (rows.length === 0)
+    throw new AppError("Pending registration not found", 401);
 
   const pending = rows[0];
 
-  if (pending.otp_used) throw new Error("OTP already used");
+  if (pending.otp_used) throw new AppError("OTP already used", 401);
   if (new Date(pending.expires_at) < new Date())
-    throw new Error("Registration expired");
+    throw new AppError("Registration expired", 401);
   if (new Date(pending.otp_expires_at) < new Date())
-    throw new Error("OTP expired");
+    throw new AppError("OTP expired", 401);
 
   // 2️⃣ Verify OTP
   const isValid = await verifyOtp(otp, pending.otp_hashed);
-  if (!isValid) throw new Error("Invalid OTP");
+  if (!isValid) throw new AppError("Invalid OTP", 401);
 
   // 3️⃣ Insert user into users table
   const result = await pool.query(
@@ -221,7 +229,7 @@ const verifyRegistrationSms = async (pending_id, otp) => {
        nationality, date_of_birth, gender, address, image_url,
        elo_rate, category, display_name, created_at, updated_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW(),NOW())
-     RETURNING id, first_name, last_name, email, phone_number, image_url`,
+     RETURNING id, first_name, last_name, email, phone_number, image_url, display_name`,
     [
       pending.first_name,
       pending.last_name,
@@ -245,6 +253,8 @@ const verifyRegistrationSms = async (pending_id, otp) => {
     pending_id,
   ]);
 
+  await sendWelcomeEmail(result.rows[0]);
+
   return result.rows[0];
 };
 
@@ -264,6 +274,11 @@ const registerUser = async ({
   display_name,
   country_code,
 }) => {
+  const passwordValidation = validatePassword(password);
+  if (!passwordValidation.isValid) {
+    throw new AppError(passwordValidation.reasons.join(", "), 400);
+  }
+
   // 1. Check if email, display_name, phone already exist
   const errors = [];
 
@@ -360,6 +375,33 @@ const registerUser = async ({
   };
 };
 
+//validate password on registration
+const validatePassword = (password) => {
+  const errors = [];
+  const hasLowercase = /[a-z]/.test(password);
+  const hasUppercase = /[A-Z]/.test(password);
+  const hasNumeric = /[0-9]/.test(password);
+  const isMinLength = password.length >= 8;
+
+  if (!hasLowercase) {
+    errors.push("Password must contain at least one lowercase letter.");
+  }
+  if (!hasUppercase) {
+    errors.push("Password must contain at least one uppercase letter.");
+  }
+  if (!hasNumeric) {
+    errors.push("Password must contain at least one numeric digit.");
+  }
+  if (!isMinLength) {
+    errors.push("Password must be a minimum of 8 characters.");
+  }
+
+  return {
+    isValid: errors.length === 0,
+    reasons: errors,
+  };
+};
+
 // Helper to generate token
 function generateEmailToken(userData) {
   return jwt.sign(
@@ -381,22 +423,24 @@ const resendEmailVerification = async ({ pending_id, email }) => {
       `SELECT * FROM pending_registrations WHERE id = $1`,
       [pending_id]
     );
-    if (!r.rows.length) throw new Error(`Pending registration not found`);
+    if (!r.rows.length)
+      throw new AppError(`Pending registration not found`, 401);
     pending = r.rows[0];
   } else if (email) {
     const r = await pool.query(
       `SELECT * FROM pending_registrations WHERE email = $1`,
       [email]
     );
-    if (!r.rows.length) throw new Error(`Pending registration not found`);
+    if (!r.rows.length)
+      throw new AppError(`Pending registration not found`, 401);
     pending = r.rows[0];
   } else {
-    throw new Error("Missing pending_id or email");
+    throw new AppError("Missing pending_id or email", 401);
   }
 
   // 2. Stop if already verified
   if (pending.email_verified) {
-    throw new Error("Email is already verified.");
+    throw new AppError("Email is already verified.", 409);
   }
 
   // 3. Rate limiting — max 3 per hour
@@ -406,7 +450,10 @@ const resendEmailVerification = async ({ pending_id, email }) => {
     const diffHrs = diffMs / (1000 * 60 * 60);
 
     if (diffHrs < 1 && pending.email_sent_count >= 3) {
-      throw new Error("Too many resend attempts. Please try again later.");
+      throw new AppError(
+        "Too many resend attempts. Please try again later.",
+        401
+      );
     }
   }
 
@@ -445,13 +492,13 @@ const loginUser = async ({ identifier, password }) => {
   console.log(user);
 
   if (!user) {
-    throw new Error("Invalid identifier or password!");
+    throw new AppError("Invalid identifier or password!", 401);
   }
 
   const valid = await bcrypt.compare(password, user.password);
 
   if (!valid) {
-    throw new Error("Invalid credentials");
+    throw new AppError("Invalid credentials", 401);
   }
 
   const token = jwt.sign(
@@ -481,7 +528,7 @@ const verifyAndInsertUser = async (token) => {
   try {
     payload = jwt.verify(token, process.env.JWT_SECRET);
   } catch (err) {
-    throw new Error("Invalid or expired token");
+    throw new AppError("Invalid or expired token", 401);
   }
 
   // find the pending row and ensure token matches and not expired
@@ -490,21 +537,24 @@ const verifyAndInsertUser = async (token) => {
     [payload.email, token]
   );
   if (!r.rows.length)
-    throw new Error("Invalid or expired token or no pending registration");
+    throw new AppError(
+      "Invalid or expired token or no pending registration",
+      401
+    );
 
   const pending = r.rows[0];
   if (
     pending.email_token_expires_at &&
     new Date(pending.email_token_expires_at) < new Date()
   ) {
-    throw new Error("Verification token expired");
+    throw new AppError("Verification token expired", 401);
   }
 
   // check user already exists
   const existing = await pool.query("SELECT 1 FROM users WHERE email = $1", [
     payload.email,
   ]);
-  if (existing.rows.length) throw new Error("Email already verified");
+  if (existing.rows.length) throw new AppError("Email already verified", 401);
 
   // insert into users table (map fields as needed)
   const result = await pool.query(
@@ -512,7 +562,7 @@ const verifyAndInsertUser = async (token) => {
       first_name, last_name, email, phone_number, country_code, nationality,
       date_of_birth, gender, address, image_url, password, elo_rate, category, display_name, created_at
     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
-     RETURNING id, email`,
+     RETURNING id, email, display_name`,
     [
       pending.first_name,
       pending.last_name,
@@ -544,10 +594,11 @@ const verifyAndInsertUser = async (token) => {
       email: newUser.email,
       message: "Email verified successfully",
     });
-  } else {
-    // if you don't have global, use the io instance available in your module
-    // console.warn('io not defined for emit');
   }
+  await sendWelcomeEmail({
+    display_name: newUser.display_name,
+    email: newUser.email,
+  });
 
   return newUser;
 };
@@ -568,7 +619,7 @@ const getUserById = async (userId) => {
   );
 
   if (result.rows.length === 0) {
-    throw new Error("Invalid email or password");
+    throw new AppError("Invalid email or password", 404);
   }
 
   return result.rows[0];
@@ -585,7 +636,7 @@ const updateUser = async (userId, userData) => {
     );
 
     if (currentResult.rows.length === 0) {
-      throw new Error("Invalid email or password");
+      throw new AppError("Invalid email or password", 404);
     }
 
     const currentImage = currentResult.rows[0].image_url;
@@ -639,7 +690,7 @@ const updateUser = async (userId, userData) => {
     const result = await client.query(query, values);
 
     if (result.rows.length === 0) {
-      throw new Error("User not updated");
+      throw new AppError("User not updated", 401);
     }
 
     const updatedUser = result.rows[0];
@@ -662,7 +713,8 @@ const updateUser = async (userId, userData) => {
 
     return updatedUser;
   } catch (err) {
-    throw err;
+    if (err instanceof AppError) throw err; // preserve intentional errors
+    throw new AppError("Error while updating user", 500);
   } finally {
     client.release();
   }
@@ -693,7 +745,7 @@ const forgotPasswordOtp = async (email) => {
     email,
   ]);
   const user = result.rows[0];
-  if (!user) throw new Error("Invalid email or password");
+  if (!user) throw new AppError("Invalid email or password", 404);
 
   const now = new Date();
   const lastSent = user.otp_last_sent;
@@ -703,8 +755,9 @@ const forgotPasswordOtp = async (email) => {
   if (lastSent) {
     const diffMinutes = (now - new Date(lastSent)) / (1000 * 60);
     if (diffMinutes < WAIT_TIME_MINUTES && count >= MAX_OTP_PER_HOUR) {
-      throw new Error(
-        `Please wait ${WAIT_TIME_MINUTES} minutes before requesting another OTP.`
+      throw new AppError(
+        `Please wait ${WAIT_TIME_MINUTES} minutes before requesting another OTP.`,
+        429
       );
     } else if (diffMinutes >= WAIT_TIME_MINUTES) {
       // Reset counter after waiting period
@@ -724,54 +777,43 @@ const forgotPasswordOtp = async (email) => {
     [otp, expiry, user.id]
   );
 
-  // 5️⃣ Prepare modern HTML email
-  const html = `
-    <div style="font-family: Arial, sans-serif; background-color:#f4f6f8; padding:30px 0; display:flex; justify-content:center;">
-      <div style="background-color:#fff; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.1); width:100%; max-width:400px; padding:30px; text-align:center;">
-        <div style="margin-bottom:20px;">
-          <img src='https://yourdomain.com/assets/logo.png' alt='Logo' width='80'/>
-        </div>
-        <h2 style="font-size:22px; margin-bottom:10px; color:#333;">Password Reset OTP</h2>
-        <p style="font-size:16px; color:#555; margin-bottom:30px;">
-          Use the following OTP to reset your password. It is valid for 10 minutes.
-        </p>
-        <div style="font-size:28px; font-weight:bold; letter-spacing:6px; background-color:#f1f5f9; padding:15px 0; border-radius:8px; margin-bottom:30px; color:#C5FF3E;">
-          ${otp}
-        </div>
-        <p style="font-size:14px; color:#777;">If you didn't request a password reset, please ignore this email.</p>
-      </div>
-    </div>
-  `;
-
-  // 6️⃣ Send OTP email
-  await sendEmail({
-    to: email,
-    subject: "Your Password Reset OTP",
-    html,
-    text: `Your OTP is ${otp}`,
-  });
+  // 5️⃣ Send OTP email
+  await sendPasswordResetOtpEmail(email, otp);
 
   return { message: "OTP sent to your email." };
 };
 
 const resetPasswordWithOtp = async ({ email, otp, newPassword }) => {
+  // 1️⃣ Fetch user by email
   const result = await pool.query("SELECT * FROM users WHERE email = $1", [
     email,
   ]);
   const user = result.rows[0];
-  if (!user) throw new Error("Invalid email or password");
+  if (!user) throw new AppError("Invalid email or password", 404);
 
-  if (!user.reset_otp || user.reset_otp !== otp) throw new Error("Invalid OTP");
+  // 2️⃣ Verify OTP
+  if (!user.reset_otp || user.reset_otp !== otp)
+    throw new AppError("Invalid OTP", 401);
 
+  // 3️⃣ Check OTP expiry
   if (new Date(user.reset_otp_expiry) < new Date())
-    throw new Error("OTP expired");
+    throw new AppError("OTP expired", 401);
 
+  // 4️⃣ Hash new password
   const hashed = await bcrypt.hash(newPassword, 10);
 
+  // 5️⃣ Update user password and clear OTP fields
   await pool.query(
     "UPDATE users SET password = $1, reset_otp = NULL, reset_otp_expiry = NULL WHERE id = $2",
     [hashed, user.id]
   );
+
+  // 6️⃣ Send password reset success email
+  try {
+    await sendPasswordResetSuccessEmail({ name: user.name, email: user.email });
+  } catch (err) {
+    console.error("Error sending password reset email:", err);
+  }
 
   return { message: "Password reset successful" };
 };

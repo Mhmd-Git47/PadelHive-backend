@@ -33,6 +33,7 @@ const createTournament = async (tournamentData) => {
     open_registration = true,
     private: isPrivate = false,
     poster_url,
+    competition_type,
   } = tournamentData;
 
   const client = await pool.connect();
@@ -40,13 +41,20 @@ const createTournament = async (tournamentData) => {
   // Helper to safely convert values to integers or null
   const toInt = (val) => (val != null ? Number(val) : null);
 
+  if (
+    competition_type !== "friendly" &&
+    competition_type !== "competitive" &&
+    competition_type === null
+  ) {
+    throw new Error(`Invalid competition type.`);
+  }
+
   try {
     await client.query("BEGIN");
 
     // Get Elo rate from category; may return null
     const eloRate =
       (await tournamentHelper.getEloRateForTournament({ category })) ?? null;
-    console.log("Elo Rate: ", eloRate);
 
     const tournamentResult = await client.query(
       `
@@ -78,12 +86,13 @@ const createTournament = async (tournamentData) => {
         created_at,
         updated_at,
         max_allowed_elo_rate,
-        state
+        state,
+        competition_type
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8,
         $9, $10, $11, $12, $13, $14, $15,
         $16, $17, $18, $19, $20, $21, $22, $23, $24,
-        NOW(), NOW(), $25, $26
+        NOW(), NOW(), $25, $26, $27
       )
       RETURNING *;
     `,
@@ -113,7 +122,8 @@ const createTournament = async (tournamentData) => {
         isPrivate,
         poster_url,
         eloRate,
-        'pending'
+        "pending",
+        competition_type,
       ]
     );
 
@@ -234,8 +244,6 @@ const isUserRegisteredToTournament = async (userId, tournamentId) => {
   // result.rows[0].count is a string, convert to number
   return Number(result.rows[0].count) > 0;
 };
-
-
 
 module.exports = {
   createTournament,

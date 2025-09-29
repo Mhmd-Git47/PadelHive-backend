@@ -4,17 +4,16 @@ if (!process.env.ZOHO_EMAIL) {
   require("dotenv").config();
 }
 
-const transporter = nodemailer.createTransport({
-  host: "smtp.zoho.com",
-  port: 465,
-  secure: true,
-  auth: {
-    user: process.env.ZOHO_EMAIL,
-    pass: process.env.ZOHO_APP_PASSWORD,
-  },
-  logger: true,
-  debug: true,
-});
+function createTransporter(email, appPassword) {
+  return nodemailer.createTransport({
+    host: "smtp.zoho.com",
+    port: 465,
+    secure: true,
+    auth: { user: email, pass: appPassword },
+    logger: true,
+    debug: true,
+  });
+}
 
 async function sendVerificationEmail(toEmail, token, userName) {
   const brandName = "PadelHive";
@@ -36,6 +35,8 @@ async function sendVerificationEmail(toEmail, token, userName) {
         padding: 0;
         box-sizing: border-box;
         background: #f5f7f9;
+        border-radius: 12px;
+        overflow: hidden;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
       }
       .container {
@@ -167,7 +168,7 @@ async function sendVerificationEmail(toEmail, token, userName) {
   </html>
   `;
 
-  await sendEmail({
+  await sendNoReplyEmail({
     to: toEmail,
     subject: "Please verify your email",
     html,
@@ -175,8 +176,58 @@ async function sendVerificationEmail(toEmail, token, userName) {
 }
 
 async function sendEmail({ to, subject, html, text }) {
+  const transporter = createTransporter(
+    process.env.ZOHO_EMAIL,
+    process.env.ZOHO_APP_PASSWORD
+  );
   const mailOptions = {
     from: `"PadelHive" <${process.env.ZOHO_EMAIL}>`,
+    to,
+    subject,
+    html,
+    text,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`Email sent to: ${to} | Subject: ${subject}`);
+  } catch (error) {
+    console.error("Error sending email:", error);
+    throw new Error("Failed to send email");
+  }
+}
+
+async function sendNoReplyEmail({ to, subject, html, text }) {
+  const transporter = createTransporter(
+    process.env.ZOHO_EMAIL_NOREPLY,
+    process.env.ZOHO_NOREPLY_APP_PASSWORD
+  );
+
+  const mailOptions = {
+    from: `"PadelHive" <${process.env.ZOHO_EMAIL_NOREPLY}>`,
+    to,
+    subject,
+    html,
+    text,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`Email sent to: ${to} | Subject: ${subject}`);
+  } catch (error) {
+    console.error("Error sending email:", error);
+    throw new Error("Failed to send email");
+  }
+}
+
+async function sendRegistrationEmail({ to, subject, html, text }) {
+  const transporter = createTransporter(
+    process.env.ZOHO_EMAIL_REGISTRATION,
+    process.env.ZOHO_REGISTRATION_APP_PASSWORD
+  );
+
+  const mailOptions = {
+    from: `"PadelHive" <${process.env.ZOHO_EMAIL_REGISTRATION}>`,
     to,
     subject,
     html,
@@ -219,4 +270,10 @@ async function sendContactEmail({ to, name, email, phone, message }) {
   await sendEmail({ to: toEmail, subject, html, text });
 }
 
-module.exports = { sendVerificationEmail, sendEmail, sendContactEmail };
+module.exports = {
+  sendVerificationEmail,
+  sendEmail,
+  sendContactEmail,
+  sendRegistrationEmail,
+  sendNoReplyEmail
+};

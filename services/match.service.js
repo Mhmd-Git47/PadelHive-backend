@@ -132,7 +132,17 @@ async function updateMatchRow(id, updatedData, client) {
 
 // 2️⃣ Completed match logic
 async function handleCompletedMatch(match, client) {
-  await updateEloForDoublesMatch(match, client);
+  const tournamentRes = await client.query(
+    `SELECT competition_type FROM tournaments WHERE id = $1`,
+    [match.tournament_id]
+  );
+  const tournament = tournamentRes.rows[0];
+  if (!tournament) throw new Error("Tournament not found");
+
+  // only if competitive, update ELO rate
+  if (tournament.competition_type === "competitive") {
+    await updateEloForDoublesMatch(match, client);
+  }
   await addMatchToUserHistory(match, client);
 }
 
@@ -229,7 +239,6 @@ async function processGroupRankings(match, groupMatches, client) {
   );
   const labelToId = {};
   for (const row of spRes.rows) labelToId[row.participant_label] = row.id;
-
 
   for (let i = 0; i < qualifiedTeams.length; i++) {
     const label = `${groupLetter}${i + 1}`;

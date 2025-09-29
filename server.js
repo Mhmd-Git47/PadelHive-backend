@@ -25,6 +25,7 @@ const reportRoutes = require("./routes/report.routes");
 const contactRoutes = require("./routes/contact.routes");
 const subscriptionRoutes = require("./routes/subscription.routes");
 const smsRoutes = require("./routes/sms.routes");
+const errorHandler = require("./middleware/errorHandler.middleware");
 
 // cron
 const tournamentCron = require("./cron/tournament.cron");
@@ -70,6 +71,8 @@ app.use("/api/participants", participantsRouter);
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 
+// for error handling
+app.use(errorHandler);
 // Change later (uncomment to use them)
 // Static file access
 // app.use("/images/users", express.static("images/users"));
