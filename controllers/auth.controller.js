@@ -5,9 +5,7 @@ const sharp = require("sharp");
 
 exports.registerAdm = async (req, res, next) => {
   try {
-    console.log("Register request body:", req.body);
     const user = await authService.registerAdmin(req.body);
-    console.log("User inserted:", user);
     res.status(201).json({ message: "User registered", user });
   } catch (err) {
     console.error("Register error:", err);
@@ -313,6 +311,38 @@ exports.deleteUser = async (req, res, next) => {
     res.json(result);
   } catch (err) {
     next(err);
+  }
+};
+
+exports.deleteUserImage = async (req, res) => {
+  try {
+    const userId = req.params.id;
+
+    // find the user
+    const user = await authService.getUserById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (!user.image_url) {
+      return res.status(400).json({ message: "User has no image to delete" });
+    }
+
+    // delete the image from disk
+    const imagePath = path.join(IMAGE_UPLOAD_PATH, user.image_url);
+    fs.unlink(imagePath, (err) => {
+      if (err) console.warn("Failed to delete image from disk:", err.message);
+    });
+
+    // clear the DB field
+    user.image_url = null;
+    await authService.updateUser(userId, {
+      image_url: null,
+    });
+    res.status(200).json({ message: "User image deleted successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error deleting user image" });
   }
 };
 

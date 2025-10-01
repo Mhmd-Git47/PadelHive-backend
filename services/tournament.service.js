@@ -30,6 +30,7 @@ const createTournament = async (tournamentData) => {
     prize_mvp,
     start_at,
     company_id,
+    location_id,
     open_registration = true,
     private: isPrivate = false,
     poster_url,
@@ -87,12 +88,13 @@ const createTournament = async (tournamentData) => {
         updated_at,
         max_allowed_elo_rate,
         state,
-        competition_type
+        competition_type,
+        location_id
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8,
         $9, $10, $11, $12, $13, $14, $15,
         $16, $17, $18, $19, $20, $21, $22, $23, $24,
-        NOW(), NOW(), $25, $26, $27
+        NOW(), NOW(), $25, $26, $27, $28
       )
       RETURNING *;
     `,
@@ -124,6 +126,7 @@ const createTournament = async (tournamentData) => {
         eloRate,
         "pending",
         competition_type,
+        location_id,
       ]
     );
 
@@ -182,6 +185,15 @@ const getTournamentsByCompanyId = async (companyId) => {
     `
     SELECT * FROM tournaments WHERE company_id = $1 ORDER BY created_at DESC`,
     [companyId]
+  );
+  return tournaments.rows;
+};
+
+const getTournamentsByLocationId = async (locationId) => {
+  const tournaments = await pool.query(
+    `
+    SELECT * FROM tournaments WHERE location_id = $1 ORDER BY created_at DESC`,
+    [locationId]
   );
   return tournaments.rows;
 };
@@ -251,6 +263,7 @@ module.exports = {
   getAllTournaments,
   getTournamentById,
   getTournamentsByCompanyId,
+  getTournamentsByLocationId,
   deleteTournament,
   getTournamentsByUserId,
   isUserRegisteredToTournament,

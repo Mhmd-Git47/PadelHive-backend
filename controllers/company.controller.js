@@ -16,8 +16,11 @@ exports.getCompanyById = async (req, res) => {
 };
 
 exports.createCompany = async (req, res) => {
-  const adminId = req.user.id;
-  const companyData = req.body;
+  const { adminId, ...companyData } = req.body;
+
+  if (!adminId) {
+    return res.status(400).json({ error: "adminId is required" });
+  }
 
   try {
     const newCompany = await companyService.createCompany(adminId, companyData);
@@ -66,7 +69,7 @@ exports.getPublicCompanyInfo = async (req, res) => {
       // latitude: company.latitude,
       // longitude: company.longitude,
       courtsNumber: company.courts_number,
-      // phoneNumber: company.phone_number, 
+      // phoneNumber: company.phone_number,
     };
 
     res.json(publicData);

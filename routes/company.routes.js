@@ -4,19 +4,21 @@ const companyController = require("../controllers/company.controller");
 const {
   authenticateToken,
   authorizeAdmin,
+  authorizeRoles,
+  authorizeSuperAdmin,
 } = require("../middleware/auth.middleware");
 
 router.post(
   "/",
   authenticateToken,
-  authorizeAdmin,
+  authorizeSuperAdmin,
   companyController.createCompany
 );
 
 router.put(
   "/:id",
   authenticateToken,
-  authorizeAdmin,
+  authorizeRoles("company_admin"),
   companyController.updateCompany
 );
 
@@ -24,7 +26,7 @@ router.put(
 router.get(
   "/:id",
   authenticateToken,
-  authorizeAdmin,
+  authorizeRoles("company_admin", "location_admin", "superadmin"),
   companyController.getCompanyById
 );
 

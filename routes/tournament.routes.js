@@ -4,7 +4,7 @@ const tournamentController = require("../controllers/tournament.controller");
 const multer = require("multer");
 const {
   authenticateToken,
-  authorizeAdmin,
+  authorizeRoles,
   authorizeSuperAdmin,
   checkTournamentOwnership,
 } = require("../middleware/auth.middleware");
@@ -28,11 +28,6 @@ const upload = multer({ storage, fileFilter });
  * - Can view tournaments without restrictions
  */
 router.get("/", tournamentController.getAllTournaments);
-router.get("/:id", tournamentController.getTournamentById);
-router.get(
-  "/company/:companyId",
-  tournamentController.getTournamentsByCompanyId
-);
 
 // user tournaments history
 router.get("/user/:userId", tournamentController.getTournamentsByUserId);
@@ -41,16 +36,32 @@ router.get(
   tournamentController.checkUserRegisteredToTournament
 );
 
+router.get("/:id", tournamentController.getTournamentById);
 /**
  * ============================
  * ADMIN ROUTES (Require Ownership)
  * ============================
  * - Only admins from the same company as the tournament can create/update/delete
  */
+
+router.get(
+  "/company/:companyId",
+  authenticateToken,
+  authorizeRoles("company_admin"),
+  tournamentController.getTournamentsByCompanyId
+);
+
+router.get(
+  "/location/:locationId",
+  authenticateToken,
+  authorizeRoles("location_admin"),
+  tournamentController.getTournamentsByLocationId
+);
+
 router.post(
   "/admin",
   authenticateToken,
-  authorizeAdmin,
+  authorizeRoles("company_admin", "location_admin"),
   upload.single("image"),
   tournamentController.createTournament
 );
@@ -58,7 +69,7 @@ router.post(
 router.patch(
   "/admin/:id",
   authenticateToken,
-  authorizeAdmin,
+  authorizeRoles("company_admin", "location_admin"),
   checkTournamentOwnership,
   upload.single("image"),
   tournamentController.updateTournament
@@ -67,7 +78,7 @@ router.patch(
 router.delete(
   "/admin/:id",
   authenticateToken,
-  authorizeAdmin,
+  authorizeRoles("company_admin", "location_admin"),
   checkTournamentOwnership,
   tournamentController.deleteTournament
 );
@@ -75,7 +86,7 @@ router.delete(
 router.get(
   "/admin/:id",
   authenticateToken,
-  authorizeAdmin,
+  authorizeRoles("company_admin", "location_admin"),
   checkTournamentOwnership,
   tournamentController.getTournamentById
 );

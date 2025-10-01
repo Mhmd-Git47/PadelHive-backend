@@ -17,7 +17,9 @@ router.get(
   authorizeSuperAdmin,
   async (req, res) => {
     try {
-      const result = await pool.query("SELECT id, username, role FROM admins");
+      const result = await pool.query(
+        "SELECT id, username, role, company_id, location_id FROM admins"
+      );
       res.json(result.rows);
     } catch (error) {
       console.error("Failed to fetch admins:", error);

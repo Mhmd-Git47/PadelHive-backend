@@ -25,6 +25,7 @@ const reportRoutes = require("./routes/report.routes");
 const contactRoutes = require("./routes/contact.routes");
 const subscriptionRoutes = require("./routes/subscription.routes");
 const smsRoutes = require("./routes/sms.routes");
+const locationRoutes = require("./routes/location.routes");
 const errorHandler = require("./middleware/errorHandler.middleware");
 
 // cron
@@ -55,6 +56,7 @@ app.use("/api/sponsors", sponsorRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/contact", contactRoutes);
 app.use("/api/subscribe", subscriptionRoutes);
+app.use("/api/locations", locationRoutes);
 
 // sms
 app.use("/api/sms", smsRoutes);

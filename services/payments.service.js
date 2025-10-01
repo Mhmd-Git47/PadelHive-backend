@@ -113,8 +113,19 @@ const updatePayment = async (id, updatedData) => {
   return result.rows[0];
 };
 
+const getTournamentPaymentByUserId = async (userId, tournamentId) => {
+  const res = await pool.query(
+    `
+      SELECT status FROM payments WHERE user_id = $1 AND tournament_id = $2 LIMIT 1`,
+    [userId, tournamentId]
+  );
+
+  return res.rows[0];
+};
+
 module.exports = {
   createPaymentParticipant,
   getPaymentsByTournamentId,
   updatePayment,
+  getTournamentPaymentByUserId,
 };

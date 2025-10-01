@@ -118,6 +118,19 @@ exports.getTournamentsByCompanyId = async (req, res) => {
   }
 };
 
+exports.getTournamentsByLocationId = async (req, res) => {
+  const { locationId } = req.params;
+  try {
+    const result = await tournamentService.getTournamentsByLocationId(
+      locationId
+    );
+    res.json(result);
+  } catch (err) {
+    console.error("Failed fetching tournaments: ", err.message);
+    res.status(500).json({ error: "Failed loading tournaments" });
+  }
+};
+
 exports.getTournamentById = async (req, res) => {
   try {
     const { id } = req.params;

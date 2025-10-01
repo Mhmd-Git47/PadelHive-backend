@@ -20,13 +20,23 @@ const registerAdmin = async ({
   username,
   password,
   role,
-  company_id = null,
+  companyId,
+  locationId,
 }) => {
   const hashed = await bcrypt.hash(password, 10);
+
+  // Ensure null is passed correctly (not "null" string)
+  const normalizedCompanyId =
+    companyId && companyId !== "null" ? companyId : null;
+
+  const normalizedLocationId =
+    locationId && locationId !== "null" ? locationId : null;
+
   const result = await pool.query(
-    "INSERT INTO admins (username, password, role, company_id) VALUES ($1, $2, $3, $4) RETURNING *",
-    [username, hashed, role || "superadmin", company_id]
+    "INSERT INTO admins (username, password, role, company_id, location_id) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+    [username, hashed, role, normalizedCompanyId, normalizedLocationId]
   );
+
   return result.rows[0];
 };
 
@@ -44,13 +54,13 @@ const loginAdmin = async ({ username, password }) => {
     {
       id: user.id,
       username: user.username,
-      role: user.role ?? "admin",
+      role: user.role,
       company_id: user.company_id || null,
+      location_id: user.location_id || null,
     },
     process.env.JWT_SECRET || "SECRET_KEY",
     { expiresIn: "1h" }
   );
-  console.log(`token: `, token);
   return token;
 };
 

@@ -2,6 +2,10 @@ const express = require("express");
 const router = express.Router();
 const authController = require("../controllers/auth.controller");
 const multer = require("multer");
+const {
+  authenticateToken,
+  authorizeRoles,
+} = require("../middleware/auth.middleware");
 
 // ------------------ Multer setup ------------------
 const storage = multer.memoryStorage();
@@ -15,7 +19,12 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({ storage, fileFilter });
 
 // ------------------ Admin Routes ------------------
-router.post("/register-admin", authController.registerAdm);
+router.post(
+  "/register-admin",
+  authenticateToken,
+  authorizeRoles("superadmin"),
+  authController.registerAdm
+);
 router.post("/login-admin", authController.loginAdm);
 
 // ------------------ User Routes ------------------
@@ -26,9 +35,19 @@ router.post("/login", authController.login);
 // User management
 router.get("/users", authController.getUsers);
 router.get("/user/:id", authController.getUserById);
-router.put("/user/:id", upload.single("image"), authController.updateUser);
-router.delete("/user/:id", authController.deleteUser);
-
+router.put(
+  "/user/:id",
+  upload.single("image"),
+  authenticateToken,
+  authController.updateUser
+);
+router.delete("/user/:id", authenticateToken, authController.deleteUser);
+router.delete(
+  "/user/:id/image",
+  authenticateToken,
+  // authorizeRoles("admin", "superadmin"), // or just allow the user himself
+  authController.deleteUserImage
+);
 // Lookup & Password management
 router.get("/lookup", authController.lookupUser);
 router.post("/forgot-password-otp", authController.forgotPasswordOtp);
