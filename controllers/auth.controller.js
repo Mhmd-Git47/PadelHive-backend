@@ -237,25 +237,34 @@ const IMAGE_UPLOAD_PATH = path.join(__dirname, "..", "images/users");
 exports.updateUser = async (req, res, next) => {
   try {
     const userId = req.params.id;
-    let newImageName = req.body.existingImageName || null;
+
+    // Ensure the authenticated user matches the user being updated
+    if (req.user.id !== userId) {
+      return res
+        .status(403)
+        .json({ message: "Forbidden: cannot update other users" });
+    }
+
+    // Fetch existing user from DB
+    const existingUser = await authService.getUserById(userId);
+    if (!existingUser)
+      return res.status(404).json({ message: "User not found" });
+
+    let newImageName = existingUser.imageName; // preserve old image
 
     // 1️⃣ Process new image if uploaded
     if (req.file) {
       newImageName = `user-${Date.now()}.webp`; // unique filename
       const outputPath = path.join(IMAGE_UPLOAD_PATH, newImageName);
 
-      // Resize, compress, convert to WebP
       await sharp(req.file.buffer)
         .resize({ width: 512, height: 512, fit: "cover" })
         .webp({ quality: 80 })
         .toFile(outputPath);
 
       // Delete old image if exists
-      if (req.body.existingImageName) {
-        const oldPath = path.join(
-          IMAGE_UPLOAD_PATH,
-          req.body.existingImageName
-        );
+      if (existingUser.imageName) {
+        const oldPath = path.join(IMAGE_UPLOAD_PATH, existingUser.imageName);
         fs.unlink(oldPath, (err) => {
           if (err) console.warn("Failed to delete old image:", err.message);
         });
@@ -269,7 +278,7 @@ exports.updateUser = async (req, res, next) => {
       email: req.body.email,
       phoneNumber: req.body.phone_number,
       nationality: req.body.nationality,
-      dateOfBirth: req.body.date_of_birth,
+      dateOfBirth: req.body.date_of_birth || existingUser.dateOfBirth,
       gender: req.body.gender,
       address: req.body.address,
       imageName: newImageName,
@@ -284,6 +293,7 @@ exports.updateUser = async (req, res, next) => {
     next(err);
   }
 };
+
 exports.lookupUser = async (req, res, next) => {
   const { identifier } = req.query;
 

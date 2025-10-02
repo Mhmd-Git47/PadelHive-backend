@@ -724,6 +724,7 @@ const updateUser = async (userId, userData) => {
     return updatedUser;
   } catch (err) {
     if (err instanceof AppError) throw err; // preserve intentional errors
+    console.log(err);
     throw new AppError("Error while updating user", 500);
   } finally {
     client.release();

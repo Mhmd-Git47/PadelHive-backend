@@ -74,9 +74,9 @@ The PadelHiveLB Team
 }
 
 // Tournament join email
-async function sendTournamentJoinEmail(user, tournament) {
+async function sendTournamentJoinEmail(user, tournament, locationName) {
   const subject = `✅ You joined ${tournament.name}!`;
-  const startDateFormatted = formatDate(tournament.startDate);
+  const startDateFormatted = formatDate(tournament.start_at);
 
   const html = `
     <h2>Hi ${user.display_name},</h2>
@@ -84,7 +84,7 @@ async function sendTournamentJoinEmail(user, tournament) {
     <p>Great news — you’ve successfully joined the <b>${tournament.name}</b> tournament! 🎉</p>
 
     <p><b>Start Date:</b> ${startDateFormatted}</p>
-    <p><b>Location:</b> ${tournament.location}</p>
+    <p><b>Location:</b> ${locationName}</p>
 
     <p>As a participant, you’ll be able to:</p>
     <ul>
@@ -119,6 +119,76 @@ We’re excited to see you on the court. Play hard and good luck!
   `;
 
   return emailService.sendRegistrationEmail({
+    to: user.email,
+    subject,
+    html,
+    text,
+  });
+}
+
+// payment confirmation
+async function sendTournamentPaymentConfirmationEmail(
+  user,
+  tournament,
+  payment
+) {
+  const subject = `💳 Payment Confirmed for ${tournament.name}!`;
+  const startDateFormatted = formatDate(tournament.start_at);
+
+  const html = `
+    <h2>Hi ${user.display_name},</h2>
+
+    <p>✅ Your payment for the <b>${
+      tournament.name
+    }</b> tournament has been successfully received!</p>
+
+    <p><b>Payment Details:</b></p>
+    <ul>
+      <li><b>Amount:</b> $${payment.amount}</li>
+      <li><b>Date:</b> ${formatDate(payment.date)}</li>
+    </ul>
+
+    <p><b>Tournament Details:</b></p>
+    <ul>
+      <li><b>Start Date:</b> ${startDateFormatted}</li>
+    </ul>
+
+    <p>Your spot is now officially secured. 🎾</p>
+
+    <p>You’ll receive updates about your schedule, opponents, and match results through PadelHiveLB.</p>
+
+    <p>Thanks for being part of our community — we can’t wait to see you compete!</p>
+
+    <p>— The PadelHiveLB Team</p>
+  `;
+
+  const text = `
+Hi ${user.display_name},
+
+Your payment for the ${
+    tournament.name
+  } tournament has been successfully received!
+
+Payment Details:
+- Amount: $${payment.amount}
+- Method: ${payment.method}
+- Date: ${formatDate(payment.date)}
+- Transaction ID: ${payment.transactionId}
+
+Tournament Details:
+- Start Date: ${startDateFormatted}
+- Location: ${tournament.location}
+
+Your spot is now officially secured. 🎾
+
+You’ll receive updates about your schedule, opponents, and match results through PadelHiveLB.
+
+Thanks for being part of our community — we can’t wait to see you compete!
+
+— The PadelHiveLB Team
+  `;
+
+  return emailService.sendNoReplyEmail({
     to: user.email,
     subject,
     html,
@@ -193,7 +263,7 @@ The PadelHive Team
 }
 
 async function sendTournamentLeftEmail(user, tournament) {
-  const startDateFormatted = formatDate(tournament.startDate);
+  const startDateFormatted = formatDate(tournament.start_at);
 
   const subject = `⚠️ You’ve left the ${tournament.name} Tournament`;
 
@@ -278,4 +348,5 @@ module.exports = {
   sendTournamentLeftEmail,
   sendPasswordResetSuccessEmail,
   sendPasswordResetOtpEmail,
+  sendTournamentPaymentConfirmationEmail,
 };

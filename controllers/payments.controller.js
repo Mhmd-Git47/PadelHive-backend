@@ -1,5 +1,4 @@
 const paymentService = require("../services/payments.service");
-const { validate: isUuid } = require("uuid");
 
 exports.getPaymentsByTournamentId = async (req, res) => {
   console.log("API hit with params:", req.params);
@@ -33,6 +32,30 @@ exports.updatePayment = async (req, res) => {
       message: "Failed to update payment. Please try again later.",
       error: "Server error while updating stage participant.",
     });
+  }
+};
+
+exports.markPaymentAsPaid = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({ error: "Payment ID is required" });
+    }
+
+    const payment = await paymentService.setPaymentPaid(id);
+
+    if (!payment) {
+      return res.status(404).json({ error: "Payment not found" });
+    }
+
+    return res.status(200).json({
+      message: "Payment marked as paid successfully",
+      payment,
+    });
+  } catch (err) {
+    console.error("Error in markPaymentAsPaid:", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 

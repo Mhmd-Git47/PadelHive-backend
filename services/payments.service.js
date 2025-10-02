@@ -1,4 +1,8 @@
 const pool = require("../db");
+const { AppError } = require("../utils/errors");
+const {
+  sendTournamentPaymentConfirmationEmail,
+} = require("../helpers/email.helper");
 
 const createPaymentParticipant = async (participantData, client) => {
   const {
@@ -113,6 +117,64 @@ const updatePayment = async (id, updatedData) => {
   return result.rows[0];
 };
 
+const setPaymentPaid = async (id) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const paymentRes = await client.query(
+      `SELECT user_id, tournament_id, amount, created_at 
+       FROM payments WHERE id = $1`,
+      [id]
+    );
+
+    const payment = paymentRes.rows[0];
+    if (!payment) {
+      throw new AppError("No Payment found.", 404);
+    }
+
+    const userRes = await client.query(
+      `SELECT id, email, display_name FROM users WHERE id = $1`,
+      [payment.user_id]
+    );
+    const user = userRes.rows[0];
+
+    const tournamentRes = await client.query(
+      `SELECT id, name, start_at FROM tournaments WHERE id = $1`,
+      [payment.tournament_id]
+    );
+    const tournament = tournamentRes.rows[0];
+
+    const query = `
+      UPDATE payments 
+      SET status = $1, paid_at = NOW(), updated_at = NOW() 
+      WHERE id = $2 
+      RETURNING *;
+    `;
+    const result = await client.query(query, ["paid", id]);
+
+    await client.query("COMMIT");
+
+    // ✅ trigger email send but don’t block response
+    if (user && tournament) {
+      sendTournamentPaymentConfirmationEmail(user, tournament, {
+        amount: payment.amount,
+        date: payment.paid_at,
+      }).catch((err) => {
+        console.error("❌ Failed to send payment confirmation email:", err);
+      });
+    }
+
+    return result.rows[0];
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error updating payment:", err);
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 const getTournamentPaymentByUserId = async (userId, tournamentId) => {
   const res = await pool.query(
     `
@@ -128,4 +190,5 @@ module.exports = {
   getPaymentsByTournamentId,
   updatePayment,
   getTournamentPaymentByUserId,
+  setPaymentPaid,
 };
