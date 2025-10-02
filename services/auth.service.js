@@ -427,6 +427,16 @@ function generateEmailToken(userData) {
 const resendEmailVerification = async ({ pending_id, email }) => {
   let pending;
 
+  // 0. Check if user is already registered
+  if (email) {
+    const rUser = await pool.query(`SELECT id FROM users WHERE email = $1`, [
+      email,
+    ]);
+    if (rUser.rows.length) {
+      throw new AppError("User with this email is already registered.", 409);
+    }
+  }
+
   // 1. Fetch pending registration
   if (pending_id) {
     const r = await pool.query(

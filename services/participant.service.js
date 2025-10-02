@@ -20,7 +20,7 @@ const createParticipant = async (participantData) => {
 
     // 1️⃣ Fetch tournament to get max_allowed_elo_rate
     const tournamentRes = await client.query(
-      `SELECT id, name, start_at, location_id max_allowed_elo_rate, tournament_type, tournament_format FROM tournaments WHERE id = $1`,
+      `SELECT id, name, start_at, location_id, max_allowed_elo_rate, tournament_type, tournament_format FROM tournaments WHERE id = $1`,
       [tournament_id]
     );
 
@@ -136,13 +136,29 @@ const createParticipant = async (participantData) => {
     ].filter(Boolean);
 
     if (userIds.length > 0) {
-      const usersRes = await client.query(
-        "SELECT id, display_name, email FROM users WHERE id = ANY($1::uuid[])",
-        [userIds]
-      );
-      const users = usersRes.rows;
-      for (const user of users) {
-        sendTournamentJoinEmail(user, tournament, location.name);
+      try {
+        const usersRes = await client.query(
+          "SELECT id, display_name, email FROM users WHERE id = ANY($1::uuid[])",
+          [userIds]
+        );
+        const users = usersRes.rows;
+
+        // Fire-and-forget emails
+        for (const user of users) {
+          sendTournamentJoinEmail(user, tournament, location.name).catch(
+            (err) => {
+              console.error(
+                "Failed sending tournament email to",
+                user.email,
+                err
+              );
+              // do NOT throw error
+            }
+          );
+        }
+      } catch (err) {
+        // Fail silently if the query itself fails
+        console.error("Failed fetching users for email", err);
       }
     }
 
