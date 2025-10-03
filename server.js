@@ -62,9 +62,9 @@ app.use("/api/locations", locationRoutes);
 app.use("/api/sms", smsRoutes);
 
 // get images
-app.use("/api/images/users", express.static("images/users"));
-app.use("/api/images/tournaments", express.static("images/tournaments"));
-app.use("/api/images/sponsors", express.static("images/sponsors"));
+app.use("/api/images/users", express.static("assets/images/users"));
+app.use("/api/images/tournaments", express.static("assets/images/tournaments"));
+app.use("/api/images/sponsors", express.static("assets/images/sponsors"));
 
 // backend integration
 app.use("/api/participants", participantsRouter);

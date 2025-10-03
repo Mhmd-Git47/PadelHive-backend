@@ -3,7 +3,13 @@ const fs = require("fs");
 const path = require("path");
 const sharp = require("sharp");
 
-const IMAGE_UPLOAD_PATH = path.join(__dirname, "..", "images", "sponsors");
+const IMAGE_UPLOAD_PATH = path.join(
+  __dirname,
+  "..",
+  "assets",
+  "images",
+  "sponsors"
+);
 
 if (!fs.existsSync(IMAGE_UPLOAD_PATH)) {
   fs.mkdirSync(IMAGE_UPLOAD_PATH, { recursive: true });

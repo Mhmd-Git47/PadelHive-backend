@@ -13,6 +13,7 @@ exports.createTournament = async (req, res) => {
       const outputPath = path.join(
         __dirname,
         "..",
+        "assets",
         "images",
         "tournaments",
         posterFilename
@@ -55,6 +56,7 @@ exports.updateTournament = async (req, res) => {
       const outputPath = path.join(
         __dirname,
         "..",
+        "assets",
         "images",
         "tournaments",
         posterFilename
@@ -72,6 +74,7 @@ exports.updateTournament = async (req, res) => {
         const oldPath = path.join(
           __dirname,
           "..",
+          "assets",
           "images",
           "tournaments",
           existingTournament.poster_url

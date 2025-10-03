@@ -116,7 +116,7 @@ const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES) || 5;
 const OTP_MAX_PER_HOUR = parseInt(process.env.OTP_MAX_PER_HOUR) || 2;
 const OTP_WAIT_TIME_MINUTES = parseInt(process.env.OTP_WAIT_TIME_MINUTES) || 10;
 const JWT_SECRET = process.env.JWT_SECRET || "SECRET_KEY";
-const IMAGE_UPLOAD_PATH = path.join(__dirname, "..", "images/users");
+const IMAGE_UPLOAD_PATH = path.join(__dirname, "..", "assets/images/users");
 
 // verification via sms
 const startRegistrationSms = async (payload) => {
@@ -466,13 +466,17 @@ const resendEmailVerification = async ({ pending_id, email }) => {
   // 3. Rate limiting — max 3 per hour
   const now = new Date();
   if (pending.email_token_expires_at) {
-    const diffMs = now - new Date(pending.email_token_expires_at);
+    const lastSentAt = new Date(
+      pending.email_token_expires_at.getTime() - 60 * 60 * 1000
+    );
+
+    const diffMs = now - lastSentAt;
     const diffHrs = diffMs / (1000 * 60 * 60);
 
     if (diffHrs < 1 && pending.email_sent_count >= 3) {
       throw new AppError(
         "Too many resend attempts. Please try again later.",
-        401
+        429
       );
     }
   }

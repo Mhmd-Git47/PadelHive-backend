@@ -41,13 +41,14 @@ exports.register = async (req, res, next) => {
       elo_rate,
       display_name,
       country_code,
+      expected_category,
     } = req.body;
 
     // Calculate ELO & category
     let calculatedElo = 900; // default beginner
     let calculatedCategory = "D-";
 
-    switch ((category || "").toLowerCase()) {
+    switch ((expected_category || "").toLowerCase()) {
       case "beginner":
         calculatedElo = 900;
         calculatedCategory = "D-";
@@ -233,7 +234,7 @@ exports.getUserById = async (req, res, next) => {
   }
 };
 
-const IMAGE_UPLOAD_PATH = path.join(__dirname, "..", "images/users");
+const IMAGE_UPLOAD_PATH = path.join(__dirname, "..", "assets/images/users");
 exports.updateUser = async (req, res, next) => {
   try {
     const userId = req.params.id;

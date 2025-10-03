@@ -7,9 +7,9 @@ const upload = multer({
   storage: multer.memoryStorage(),
   fileFilter: (req, file, cb) => {
     // Accept only images
-    if (!file.mimetype.startsWith("image/")) {
-      return cb(new Error("Only image files are allowed!"), false);
-    }
+    // if (!file.mimetype.startsWith("image/")) {
+    //   return cb(new Error("Only image files are allowed!"), false);
+    // }
     cb(null, true);
   },
 });
