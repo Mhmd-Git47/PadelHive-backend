@@ -176,8 +176,11 @@ const updateTournament = async (id, updateData) => {
 };
 
 const getAllTournaments = async () => {
-  const tournaments = await pool.query(`SELECT * FROM tournaments ORDER BY id`);
-  return tournaments.rows;
+  const result = await pool.query(
+    `SELECT * FROM tournaments WHERE private = $1 ORDER BY start_at ASC`,
+    [false]
+  );
+  return result.rows;
 };
 
 const getTournamentsByCompanyId = async (companyId) => {

@@ -18,9 +18,9 @@ const createParticipant = async (participantData) => {
   try {
     await client.query("BEGIN");
 
-    // 1️⃣ Fetch tournament to get max_allowed_elo_rate
+    // 1️⃣ Fetch tournament to get max_allowed_elo_rate && is registration is open
     const tournamentRes = await client.query(
-      `SELECT id, name, start_at, location_id, max_allowed_elo_rate, tournament_type, tournament_format FROM tournaments WHERE id = $1`,
+      `SELECT id, name, start_at, location_id, open_registration, max_allowed_elo_rate, tournament_type, tournament_format FROM tournaments WHERE id = $1`,
       [tournament_id]
     );
 
@@ -29,6 +29,11 @@ const createParticipant = async (participantData) => {
     }
 
     const tournament = tournamentRes.rows[0];
+
+    // check if tournament registration is closed
+    if (!tournament.open_registration) {
+      throw new AppError(`Cannot register: Registration is closed.`, 400);
+    }
 
     // 2️⃣ Check if participant(s) Elo is within allowed range
     const usersElo = [
@@ -396,7 +401,7 @@ const deleteParticipant = async (participantId) => {
 
     if (userIds.length > 0) {
       const usersRes = await client.query(
-        `SELECT id, name, email FROM users WHERE id = ANY($1::uuid[])`,
+        `SELECT id, display_name, email FROM users WHERE id = ANY($1::uuid[])`,
         [userIds]
       );
       const users = usersRes.rows;
