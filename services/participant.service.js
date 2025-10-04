@@ -406,7 +406,11 @@ const deleteParticipant = async (participantId) => {
       );
       const users = usersRes.rows;
       for (const user of users) {
-        await sendTournamentLeftEmail(user, updatedTournament);
+        try {
+          sendTournamentLeftEmail(user, updatedTournament);
+        } catch (err) {
+          console.error("Email sending failed (non-blocking):", err);
+        }
       }
     }
 

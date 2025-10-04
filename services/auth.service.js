@@ -508,12 +508,26 @@ const resendEmailVerification = async ({ pending_id, email }) => {
 };
 
 const loginUser = async ({ identifier, password }) => {
+  if (!identifier) throw new AppError("Identifier is required", 400);
+
+  const firstChar = identifier[0];
+  const rest = identifier.slice(1);
+
   const result = await pool.query(
-    "SELECT * FROM users WHERE email = $1 OR display_name = $2",
-    [identifier, identifier]
+    `
+    SELECT *
+    FROM users
+    WHERE email = $1
+       OR (
+          LEFT(display_name, 1) ILIKE $2
+          AND SUBSTRING(display_name FROM 2) = $3
+       )
+    LIMIT 1
+    `,
+    [identifier, firstChar, rest]
   );
+
   const user = result.rows[0];
-  console.log(user);
 
   if (!user) {
     throw new AppError("Invalid identifier or password!", 401);
@@ -528,9 +542,7 @@ const loginUser = async ({ identifier, password }) => {
   const token = jwt.sign(
     { id: user.id, role: "user" },
     process.env.JWT_SECRET,
-    {
-      expiresIn: "2h",
-    }
+    { expiresIn: "2h" }
   );
 
   return {

@@ -300,7 +300,7 @@ exports.lookupUser = async (req, res, next) => {
 
   if (!identifier) {
     return res.status(400).json({ error: "Missing identifier" });
-  }
+  }  
 
   try {
     const result = await authService.lookupUser(identifier);
