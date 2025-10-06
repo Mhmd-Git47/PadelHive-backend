@@ -159,7 +159,7 @@ const setPaymentPaid = async (id) => {
     if (user && tournament) {
       sendTournamentPaymentConfirmationEmail(user, tournament, {
         amount: payment.amount,
-        date: payment.paid_at,
+        date: result.rows[0].paid_at,
       }).catch((err) => {
         console.error("❌ Failed to send payment confirmation email:", err);
       });

@@ -84,6 +84,7 @@ exports.register = async (req, res, next) => {
       const outputPath = path.join(
         __dirname,
         "..",
+        "assets",
         "images",
         "users",
         filename
@@ -276,8 +277,8 @@ exports.updateUser = async (req, res, next) => {
     const userData = {
       firstName: req.body.first_name,
       lastName: req.body.last_name,
-      email: req.body.email,
-      phoneNumber: req.body.phone_number,
+      // email: req.body.email,
+      // phoneNumber: req.body.phone_number,
       nationality: req.body.nationality,
       dateOfBirth: req.body.date_of_birth || existingUser.dateOfBirth,
       gender: req.body.gender,
@@ -300,7 +301,7 @@ exports.lookupUser = async (req, res, next) => {
 
   if (!identifier) {
     return res.status(400).json({ error: "Missing identifier" });
-  }  
+  }
 
   try {
     const result = await authService.lookupUser(identifier);
