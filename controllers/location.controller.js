@@ -90,10 +90,23 @@ const deleteLocation = async (req, res, next) => {
   }
 };
 
+const fetchAllCities = async (req, res) => {
+  try {
+    const cities = await locationService.getAllCities();
+    // If you want just an array of strings instead of objects
+    const cityNames = cities.map((c) => c.city);
+    res.status(200).json(cityNames);
+  } catch (err) {
+    console.error("Error fetching cities:", err);
+    res.status(500).json({ error: "Failed to fetch cities" });
+  }
+};
+
 module.exports = {
   createLocation,
   getLocations,
   getLocationById,
   updateLocation,
   deleteLocation,
+  fetchAllCities,
 };

@@ -23,11 +23,18 @@ router.get(
   locationController.getLocations
 );
 
+router.get("/cities", locationController.fetchAllCities);
+
 // Get single location by ID
 router.get("/:id", locationController.getLocationById);
 
 // Update location — company admin or location admin for their own location
-router.patch("/:id", authenticateToken, authorizeRoles('superadmin', 'company_admin'), locationController.updateLocation);
+router.patch(
+  "/:id",
+  authenticateToken,
+  authorizeRoles("superadmin", "company_admin"),
+  locationController.updateLocation
+);
 
 // Delete location — company admin or superadmin only
 router.delete("/:id", locationController.deleteLocation);

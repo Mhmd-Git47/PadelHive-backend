@@ -75,10 +75,17 @@ const deleteLocation = async (id) => {
   return true;
 };
 
+const getAllCities = async () => {
+  const result = await pool.query(`
+    SELECT DISTINCT city FROM locations WHERE city IS NOT NULL ORDER BY city ASC`);
+  return result.rows;
+};
+
 module.exports = {
   createLocation,
   getLocations,
   getLocationById,
   updateLocation,
   deleteLocation,
+  getAllCities,
 };
