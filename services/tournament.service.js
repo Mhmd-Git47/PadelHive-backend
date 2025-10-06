@@ -177,7 +177,12 @@ const updateTournament = async (id, updateData) => {
 
 const getAllTournaments = async () => {
   const result = await pool.query(
-    `SELECT * FROM tournaments WHERE private = $1 ORDER BY start_at ASC`,
+    `SELECT * 
+     FROM tournaments 
+     WHERE private = $1 
+       AND state != 'completed' 
+       AND start_at > NOW()
+     ORDER BY start_at ASC`,
     [false]
   );
   return result.rows;
