@@ -15,6 +15,12 @@ router.get(
   paymentController.getPaymentsByTournamentId
 );
 router.get(
+  "/company/:companyId",
+  authenticateToken,
+  authorizeRoles("company_admin"),
+  paymentController.getPaymentsByCompanyId
+);
+router.get(
   "/:userId/:tournamentId",
   authenticateToken,
   paymentController.getTournamentPaymentsByUserId

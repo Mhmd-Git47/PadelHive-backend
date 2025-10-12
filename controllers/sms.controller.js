@@ -1,3 +1,4 @@
+const { sendEmail } = require("../services/email.service");
 const { sendSms, sendWhatsapp } = require("../services/twilio.service");
 
 async function testSms(req, res) {
@@ -8,7 +9,12 @@ async function testSms(req, res) {
   }
 
   try {
-    const result = await sendWhatsapp(phone, message);
+    const result = await sendEmail({
+      to: "mohammadrawass12@gmail.com",
+      subject: "Welcome to PadelHive!",
+      text: "Your account has been created successfully.",
+      html: "<p>Your account has been created successfully.</p>",
+    });
     res.json({ success: true, sid: result.sid });
   } catch (err) {
     res.status(500).json({ error: "failed to send sms", details: err.message });

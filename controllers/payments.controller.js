@@ -1,18 +1,35 @@
 const paymentService = require("../services/payments.service");
 
 exports.getPaymentsByTournamentId = async (req, res) => {
-  console.log("API hit with params:", req.params);
   try {
     const { tournamentId } = req.params;
-    console.log("tournamentId:", tournamentId);
 
     const payments = await paymentService.getPaymentsByTournamentId(
       tournamentId
     );
     res.json(payments);
   } catch (err) {
-    console.error("Error fetching payments:", err); // log full error
-    res.status(500).json({ error: err.message }); // send actual DB error
+    console.error("Error fetching payments:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.getPaymentsByCompanyId = async (req, res) => {
+  try {
+    const { companyId } = req.params;
+    console.log("Incoming companyId:", companyId);
+
+    if (!companyId) {
+      return res
+        .status(400)
+        .json({ error: "companyId parameter is required." });
+    }
+
+    const payments = await paymentService.getPaymentsByCompanyId(companyId);
+    return res.status(200).json({ success: true, payments });
+  } catch (err) {
+    console.error("Error fetching payments by company:", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 

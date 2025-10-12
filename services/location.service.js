@@ -37,6 +37,9 @@ const getLocations = async (companyId = null) => {
 
 // Get a location by ID
 const getLocationById = async (id) => {
+  if (!id) {
+    throw new Error("Location ID is required");
+  }
   const result = await pool.query("SELECT * FROM locations WHERE id = $1", [
     id,
   ]);

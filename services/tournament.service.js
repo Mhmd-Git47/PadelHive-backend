@@ -180,10 +180,10 @@ const getAllTournaments = async () => {
     `SELECT * 
      FROM tournaments 
      WHERE private = $1 
-       AND state != 'completed' 
-       AND start_at > NOW()
+       AND state != $2
+       
      ORDER BY start_at ASC`,
-    [false]
+    [false, "completed"]
   );
   return result.rows;
 };
@@ -245,7 +245,10 @@ const deleteTournament = async (id) => {
 const getTournamentsByUserId = async (userId) => {
   const tournaments = await pool.query(
     `
-    SELECT * FROM user_tournaments_history WHERE user_id = $1 ORDER BY registered_at DESC
+    SELECT tournament_id, participant_id, registered_at, completed_at, cancelled_at
+    FROM user_tournaments_history
+    WHERE user_id = $1
+    ORDER BY registered_at DESC;
   `,
     [userId]
   );

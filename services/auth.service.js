@@ -847,7 +847,10 @@ const resetPasswordWithOtp = async ({ email, otp, newPassword }) => {
 
   // 6️⃣ Send password reset success email
   try {
-    await sendPasswordResetSuccessEmail({ name: user.name, email: user.email });
+    await sendPasswordResetSuccessEmail({
+      name: user.display_name,
+      email: user.email,
+    });
   } catch (err) {
     console.error("Error sending password reset email:", err);
   }

@@ -91,6 +91,20 @@ const getPaymentsByTournamentId = async (tournamentId) => {
   return res.rows;
 };
 
+const getPaymentsByCompanyId = async (companyId) => {
+  const res = await pool.query(
+    `
+    SELECT p.*
+    FROM payments p
+    INNER JOIN tournaments t ON p.tournament_id = t.id
+    WHERE t.company_id = $1 AND t.state = $2
+  `,
+    [companyId, "pending"]
+  );
+
+  return res.rows;
+};
+
 const updatePayment = async (id, updatedData) => {
   if (Object.keys(updatedData).length === 0) {
     throw new Error(`No Fields provided to update`);
@@ -188,6 +202,7 @@ const getTournamentPaymentByUserId = async (userId, tournamentId) => {
 module.exports = {
   createPaymentParticipant,
   getPaymentsByTournamentId,
+  getPaymentsByCompanyId,
   updatePayment,
   getTournamentPaymentByUserId,
   setPaymentPaid,

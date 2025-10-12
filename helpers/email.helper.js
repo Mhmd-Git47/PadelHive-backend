@@ -118,7 +118,7 @@ We’re excited to see you on the court. Play hard and good luck!
 — The PadelHiveLB Team
   `;
 
-  return emailService.sendRegistrationEmail({
+  return emailService.sendEmail({
     to: user.email,
     subject,
     html,
@@ -188,7 +188,7 @@ Thanks for being part of our community — we can’t wait to see you compete!
 — The PadelHiveLB Team
   `;
 
-  return emailService.sendNoReplyEmail({
+  return emailService.sendEmail({
     to: user.email,
     subject,
     html,
@@ -222,7 +222,7 @@ If you believe this was a mistake or have any questions, please contact our supp
 
 — The PadelHiveLB Team`;
 
-  return emailService.sendNoReplyEmail({
+  return emailService.sendEmail({
     to: user.email,
     subject,
     html,
@@ -259,7 +259,7 @@ Stay safe,
 The PadelHive Team
   `;
 
-  return emailService.sendNoReplyEmail({ to: user.email, subject, html, text });
+  return emailService.sendEmail({ to: user.email, subject, html, text });
 }
 
 async function sendTournamentLeftEmail(user, tournament) {
@@ -293,7 +293,7 @@ We hope to see you back in future tournaments and on the leaderboard soon!
 
 — The PadelHiveLB Team`;
 
-  return emailService.sendNoReplyEmail({
+  return emailService.sendEmail({
     to: user.email,
     subject,
     html,
@@ -331,7 +331,7 @@ const sendPasswordResetOtpEmail = async (email, otp) => {
     </div>
   `;
 
-  return emailService.sendNoReplyEmail({
+  return emailService.sendEmail({
     to: email,
     subject: "Your Password Reset OTP",
     html,

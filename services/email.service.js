@@ -4,16 +4,26 @@ if (!process.env.ZOHO_EMAIL) {
   require("dotenv").config();
 }
 
-function createTransporter(email, appPassword) {
-  return nodemailer.createTransport({
-    host: "smtp.zoho.com",
-    port: 465,
-    secure: true,
-    auth: { user: email, pass: appPassword },
-    logger: true,
-    debug: true,
-  });
-}
+// function createTransporter(email, appPassword) {
+//   return nodemailer.createTransport({
+//     host: "smtp.zoho.com",
+//     port: 465,
+//     secure: true,
+//     auth: { user: email, pass: appPassword },
+//     logger: true,
+//     debug: true,
+//   });
+// }
+
+const transporter = nodemailer.createTransport({
+  host: "email-smtp.eu-central-1.amazonaws.com",
+  port: 587,
+  secure: false,
+  auth: {
+    user: process.env.AWS_SES_USER,
+    pass: process.env.AWS_SES_PASS,
+  },
+});
 
 async function sendVerificationEmail(toEmail, token, userName) {
   const brandName = "PadelHive";
@@ -168,7 +178,7 @@ async function sendVerificationEmail(toEmail, token, userName) {
   </html>
   `;
 
-  await sendNoReplyEmail({
+  await sendEmail({
     to: toEmail,
     subject: "Please verify your email",
     html,
@@ -176,12 +186,13 @@ async function sendVerificationEmail(toEmail, token, userName) {
 }
 
 async function sendEmail({ to, subject, html, text }) {
-  const transporter = createTransporter(
-    process.env.ZOHO_EMAIL,
-    process.env.ZOHO_APP_PASSWORD
-  );
+  // const transporter = createTransporter(
+  //   process.env.ZOHO_EMAIL,
+  //   process.env.ZOHO_APP_PASSWORD
+  // );
   const mailOptions = {
     from: `"PadelHive" <${process.env.ZOHO_EMAIL}>`,
+    replyTo: "support@padelhivelb.com",
     to,
     subject,
     html,
@@ -189,10 +200,11 @@ async function sendEmail({ to, subject, html, text }) {
   };
 
   try {
-    await transporter.sendMail(mailOptions);
-    console.log(`Email sent to: ${to} | Subject: ${subject}`);
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`✅ Email sent to: ${to} | Subject: ${subject}`);
+    return info;
   } catch (error) {
-    console.error("Error sending email:", error);
+    console.error("❌ Error sending email:", error);
     throw new Error("Failed to send email");
   }
 }
@@ -275,5 +287,5 @@ module.exports = {
   sendEmail,
   sendContactEmail,
   sendRegistrationEmail,
-  sendNoReplyEmail
+  sendNoReplyEmail,
 };

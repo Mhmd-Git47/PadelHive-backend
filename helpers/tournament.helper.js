@@ -81,7 +81,7 @@ async function getEloRateForTournament(tournament) {
       return 1249;
     case "D+/C+":
       return 1199;
-    case "D-/B-":
+    case "D-/C-":
       return 1099;
     case "E/D":
       return 1049;
