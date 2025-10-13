@@ -758,11 +758,22 @@ const updateUser = async (userId, userData) => {
 };
 
 const lookupUser = async (identifier) => {
+  if (!identifier) return null;
+  const firstChar = identifier[0];
+  const rest = identifier.slice(1);
+
   const result = await pool.query(
     `
-      SELECT id, email, display_name, elo_rate FROM users WHERE email = $1 OR display_name = $1 LIMIT 1
+      SELECT id, email, display_name, elo_rate
+      FROM users
+      WHERE email = $1
+         OR (
+            LEFT(display_name, 1) ILIKE $2
+            AND SUBSTRING(display_name FROM 2) = $3
+         )
+      LIMIT 1
     `,
-    [identifier]
+    [identifier, firstChar, rest]
   );
 
   return result.rows[0];
