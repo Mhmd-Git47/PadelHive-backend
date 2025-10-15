@@ -72,14 +72,14 @@ const updateMatch = async (id, updatedData) => {
       const groupStandings = await groupService.getGroupStandings(
         updatedMatch.tournament_id
       );
-      if (global.io) {
-        global.io
-          .to(`tournament_${updatedMatch.tournament_id}`)
-          .emit("group-standings-updated", {
-            tournamentId: updatedMatch.tournament_id,
-            standings: groupStandings,
-          });
-      }
+      // if (global.io) {
+      //   global.io
+      //     .to(`tournament_${updatedMatch.tournament_id}`)
+      //     .emit("group-standings-updated", {
+      //       tournamentId: updatedMatch.tournament_id,
+      //       standings: groupStandings,
+      //     });
+      // }
     } else {
       // 4️⃣ Handle final stage / knockout
       await handleFinalStage(updatedMatch, client);
@@ -89,9 +89,27 @@ const updateMatch = async (id, updatedData) => {
 
     // WebSocket: emit updated match to all clients
     if (global.io) {
+      // 1️⃣ Emit the updated match
       global.io
         .to(`tournament_${updatedMatch.tournament_id}`)
         .emit("match-updated", updatedMatch);
+
+      try {
+        // 2️⃣ Recalculate standings after DB update
+        const newStandings = await groupService.getGroupStandings(
+          updatedMatch.tournament_id
+        );
+
+        // 3️⃣ Emit updated standings to all connected clients
+        global.io
+          .to(`tournament_${updatedMatch.tournament_id}`)
+          .emit("group-standings-updated", {
+            tournamentId: updatedMatch.tournament_id,
+            standings: newStandings,
+          });
+      } catch (err) {
+        console.error("Error recalculating group standings: ", err);
+      }
     }
 
     return updatedMatch;

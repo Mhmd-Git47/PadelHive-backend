@@ -29,6 +29,12 @@ router.post("/login-admin", authController.loginAdm);
 
 // ------------------ User Routes ------------------
 // Registration with optional profile image
+router.post(
+  "/admin/register-user",
+  authenticateToken,
+  authorizeRoles("superadmin"),
+  authController.registerUserFromAdmin
+);
 router.post("/register", upload.single("image_url"), authController.register);
 router.post("/login", authController.login);
 

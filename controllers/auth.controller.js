@@ -25,6 +25,92 @@ exports.loginAdm = async (req, res, next) => {
 // ----------------------------
 // Register user (initial, pending email verification)
 // ----------------------------
+exports.registerUserFromAdmin = async (req, res, next) => {
+  console.log(req.body);
+  let {
+    first_name,
+    last_name,
+    email,
+    phone_number,
+    gender,
+    password,
+    display_name,
+    country_code,
+    expected_category,
+  } = req.body;
+  console.log(req.body);
+
+  // Calculate ELO & category (optional, to prevent frontend tampering)
+  let calculatedElo = 900; // default beginner
+  let calculatedCategory = "D-";
+
+  switch ((expected_category || "").toLowerCase()) {
+    case "beginner":
+      calculatedElo = 900;
+      calculatedCategory = "D-";
+      break;
+    case "intermediate":
+      calculatedElo = 1050;
+      calculatedCategory = "C-";
+      break;
+    case "advanced":
+      calculatedElo = 1200;
+      calculatedCategory = "B-";
+      break;
+    case "professional":
+      calculatedElo = 1350;
+      calculatedCategory = "A-";
+      break;
+    case "elite":
+      calculatedElo = 1500;
+      calculatedCategory = "A+";
+      break;
+  }
+
+  const category = calculatedCategory;
+  const elo_rate = calculatedElo;
+
+  // // Handle profile image upload (optional)
+  // let image_url = null;
+  // if (req.file) {
+  //   const filename = `user-${Date.now()}.webp`;
+  //   const outputPath = path.join(
+  //     __dirname,
+  //     "..",
+  //     "assets",
+  //     "images",
+  //     "users",
+  //     filename
+  //   );
+
+  //   await sharp(req.file.buffer)
+  //     .resize({ width: 512, height: 512, fit: "cover" })
+  //     .webp({ quality: 80 })
+  //     .toFile(outputPath);
+
+  //   image_url = filename;
+  // }
+
+  // Call service to create the user
+  const result = await authService.registerUserFromAdm({
+    first_name,
+    last_name,
+    email,
+    phone_number,
+    gender,
+    password,
+    category,
+    elo_rate,
+    display_name,
+    country_code,
+  });
+
+  res.status(201).json({
+    success: true,
+    message: result.message,
+  });
+};
+
 exports.register = async (req, res, next) => {
   try {
     let {

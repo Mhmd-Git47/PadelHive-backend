@@ -268,6 +268,80 @@ const verifyRegistrationSms = async (pending_id, otp) => {
   return result.rows[0];
 };
 
+ const registerUserFromAdm = async ({
+  first_name,
+  last_name,
+  email,
+  phone_number,
+  gender,
+  password,
+  display_name,
+  country_code,
+  elo_rate,
+  category,
+}) => {
+  // 1️⃣ Check for duplicates
+  const checkQuery = `
+    SELECT 
+      CASE 
+        WHEN email = $1 THEN 'email'
+        WHEN display_name = $2 THEN 'display_name'
+        WHEN phone_number = $3 THEN 'phone_number'
+      END AS conflict_field
+    FROM users
+    WHERE email = $1 OR display_name = $2 OR phone_number = $3
+  `;
+
+  const checkRes = await pool.query(checkQuery, [
+    email,
+    display_name,
+    phone_number,
+  ]);
+
+  if (checkRes.rows.length > 0) {
+    const conflicts = checkRes.rows.map((r) => r.conflict_field);
+    const messages = [];
+    if (conflicts.includes("email")) messages.push("Email already registered");
+    if (conflicts.includes("display_name"))
+      messages.push("Display Name already registered");
+    if (conflicts.includes("phone_number"))
+      messages.push("Phone Number already registered");
+
+    throw new AppError(messages.join(", "), 400);
+  }
+
+  // 2️⃣ Hash password
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  // 3️⃣ Insert user into DB
+  const insertQuery = `
+    INSERT INTO users (
+      first_name, last_name, email, country_code, phone_number,
+      gender, password, elo_rate, category, display_name, created_at
+    )
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+    RETURNING id, email, display_name, category
+  `;
+
+  const insertRes = await pool.query(insertQuery, [
+    first_name,
+    last_name,
+    email,
+    country_code,
+    phone_number,
+    gender,
+    hashedPassword,
+    elo_rate,
+    category,
+    display_name,
+  ]);
+
+  return {
+    message: "User successfully created",
+    user: insertRes.rows[0],
+  };
+};
+
 const registerUser = async ({
   first_name,
   last_name,
@@ -873,6 +947,7 @@ module.exports = {
   registerAdmin,
   loginAdmin,
   updateAdmin,
+  registerUserFromAdm,
   registerUser,
   loginUser,
   verifyAndInsertUser,

@@ -13,6 +13,7 @@ exports.createMatch = async (req, res) => {
 
 exports.updateMatch = async (req, res) => {
   try {
+    console.log("begin");
     const { id } = req.params;
     const updatedData = req.body;
 
