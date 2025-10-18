@@ -122,7 +122,7 @@ const updateMatch = async (id, updatedData) => {
 
       try {
         // 2️⃣ Recalculate standings after DB update
-        const newStandings = await groupService.getGroupStandings(
+        const newStandings = await groupService.getSortedGroupStandings(
           updatedMatch.tournament_id
         );
 
@@ -217,7 +217,7 @@ async function processGroupRankings(match, groupMatches, client) {
   // Step 1️⃣ — Aggregate all stats
   groupMatches.forEach((m) => {
     const { player1_id, player2_id, winner_id, scores_csv } = m;
-    if (!player1_id || !player2_id || !winner_id) return;
+    if (!player1_id || !player2_id) return;
 
     [player1_id, player2_id].forEach((pid) => {
       if (!participantStats[pid]) {
@@ -231,13 +231,16 @@ async function processGroupRankings(match, groupMatches, client) {
       }
     });
 
-    participantStats[winner_id].wins += 1;
+    if (winner_id) participantStats[winner_id].wins += 1;
+
     participantStats[player1_id].matchesPlayed += 1;
     participantStats[player2_id].matchesPlayed += 1;
 
     const sets = scores_csv ? scores_csv.split(",") : [];
     sets.forEach((set) => {
-      const [p1Score, p2Score] = set.trim().split("-").map(Number);
+      const scores = set.trim().split("-").map(Number);
+      const p1Score = scores[0];
+      const p2Score = scores[1];
       if (!isNaN(p1Score) && !isNaN(p2Score)) {
         participantStats[player1_id].pointsFor += p1Score;
         participantStats[player1_id].pointsAgainst += p2Score;
@@ -248,44 +251,83 @@ async function processGroupRankings(match, groupMatches, client) {
   });
 
   // Step 2️⃣ — Calculate matchDiff
-  // Rank participants
   const ranked = Object.values(participantStats).map((p) => ({
     ...p,
     matchDiff: p.pointsFor - p.pointsAgainst,
   }));
-  // .sort(
-  //   (a, b) =>
-  //     b.wins - a.wins ||
-  //     b.matchDiff - a.matchDiff ||
-  //     b.pointsFor - a.pointsFor
-  // );
 
   // Step 3️⃣ — Primary sort: wins → matchDiff
   ranked.sort((a, b) => b.wins - a.wins || b.matchDiff - a.matchDiff);
 
-  // Step 4️⃣ — Secondary head-to-head tie-break for exact ties
-  for (let i = 0; i < ranked.length - 1; i++) {
-    const curr = ranked[i];
-    const next = ranked[i + 1];
+  // Step 4️⃣ — Handle multi-way ties with head-to-head
+  const groupedByWinsAndDiff = {};
+  ranked.forEach((p) => {
+    const key = p.wins + "-" + p.matchDiff;
+    if (!groupedByWinsAndDiff[key]) groupedByWinsAndDiff[key] = [];
+    groupedByWinsAndDiff[key].push(p);
+  });
 
-    const tied = curr.wins === next.wins && curr.matchDiff === next.matchDiff;
+  Object.keys(groupedByWinsAndDiff).forEach((key) => {
+    const tiedPlayers = groupedByWinsAndDiff[key];
+    if (tiedPlayers.length <= 1) return;
 
-    if (tied) {
-      const directMatch = groupMatches.find(
-        (m) =>
-          (m.player1_id === curr.participant_id &&
-            m.player2_id === next.participant_id) ||
-          (m.player1_id === next.participant_id &&
-            m.player2_id === curr.participant_id)
-      );
+    const miniStats = {};
+    tiedPlayers.forEach((p) => {
+      miniStats[p.participant_id] = {
+        id: p.participant_id,
+        wins: 0,
+        pointsFor: 0,
+        pointsAgainst: 0,
+      };
+    });
 
-      if (directMatch && directMatch.winner_id) {
-        if (directMatch.winner_id === next.participant_id) {
-          [ranked[i], ranked[i + 1]] = [ranked[i + 1], ranked[i]];
-        }
+    groupMatches.forEach((m) => {
+      const { player1_id, player2_id, winner_id, scores_csv } = m;
+
+      if (
+        tiedPlayers.some((tp) => tp.participant_id === player1_id) &&
+        tiedPlayers.some((tp) => tp.participant_id === player2_id)
+      ) {
+        if (winner_id && miniStats[winner_id]) miniStats[winner_id].wins++;
+
+        const sets = scores_csv ? scores_csv.split(",") : [];
+        sets.forEach((set) => {
+          const scores = set.trim().split("-").map(Number);
+          const p1Score = scores[0];
+          const p2Score = scores[1];
+          if (!isNaN(p1Score) && !isNaN(p2Score)) {
+            if (miniStats[player1_id]) {
+              miniStats[player1_id].pointsFor += p1Score;
+              miniStats[player1_id].pointsAgainst += p2Score;
+            }
+            if (miniStats[player2_id]) {
+              miniStats[player2_id].pointsFor += p2Score;
+              miniStats[player2_id].pointsAgainst += p1Score;
+            }
+          }
+        });
       }
-    }
-  }
+    });
+
+    const allZeroWins = Object.values(miniStats).every((ms) => ms.wins === 0);
+
+    const miniRank = allZeroWins
+      ? tiedPlayers.sort(
+          (a, b) => b.matchDiff - a.matchDiff || b.pointsFor - a.pointsFor
+        )
+      : Object.values(miniStats)
+          .sort(
+            (a, b) =>
+              b.wins - a.wins ||
+              b.pointsFor - b.pointsAgainst - (a.pointsFor - a.pointsAgainst) ||
+              b.pointsFor - a.pointsFor
+          )
+          .map((ms) => tiedPlayers.find((tp) => tp.participant_id === ms.id));
+
+    groupedByWinsAndDiff[key] = miniRank;
+  });
+
+  const newRanked = Object.values(groupedByWinsAndDiff).flat();
 
   // Step 5️⃣ — Get advancing participants
   const tournamentRes = await client.query(
@@ -293,7 +335,7 @@ async function processGroupRankings(match, groupMatches, client) {
     [match.tournament_id]
   );
   const tournament = tournamentRes.rows[0];
-  const qualifiedTeams = ranked.slice(0, tournament.participants_advance);
+  const qualifiedTeams = newRanked.slice(0, tournament.participants_advance);
 
   // Step 6️⃣ — Map stage participants
   const groupRes = await client.query(`SELECT * FROM groups WHERE id = $1`, [
@@ -313,15 +355,17 @@ async function processGroupRankings(match, groupMatches, client) {
     [finalStageId]
   );
   const labelToId = {};
-  for (const row of spRes.rows) labelToId[row.participant_label] = row.id;
+  spRes.rows.forEach((row) => {
+    labelToId[row.participant_label] = row.id;
+  });
 
   for (let i = 0; i < qualifiedTeams.length; i++) {
-    const label = `${groupLetter}${i + 1}`;
+    const label = groupLetter + (i + 1);
     const spId = labelToId[label];
     if (!spId) continue;
+
     const existing = await client.query(
-      `SELECT id FROM stage_participants 
-   WHERE stage_id = $1 AND participant_id = $2`,
+      `SELECT id FROM stage_participants WHERE stage_id = $1 AND participant_id = $2`,
       [finalStageId, qualifiedTeams[i].participant_id]
     );
 

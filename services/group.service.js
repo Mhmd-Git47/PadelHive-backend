@@ -324,6 +324,124 @@ const getGroupStandings = async (tournamentId) => {
   return groupedStats;
 };
 
+async function getSortedGroupStandings(tournamentId) {
+  const [participants, matches] = await Promise.all([
+    getParticipantsByTournamentId(tournamentId),
+    getMatchesByTournamentId(tournamentId),
+  ]);
+
+  // Map participant → group
+  const groupParticipantRes = await pool.query(
+    `SELECT participant_id, group_id FROM group_participants WHERE participant_id = ANY($1::int[])`,
+    [participants.map((p) => p.id)]
+  );
+
+  const participantGroupMap = {};
+  groupParticipantRes.rows.forEach((row) => {
+    participantGroupMap[row.participant_id] = row.group_id;
+  });
+
+  const stats = {};
+  participants.forEach((p) => {
+    const groupId = participantGroupMap[p.id];
+    if (!groupId) return;
+
+    stats[p.id] = {
+      participant_id: p.id,
+      name: p.name,
+      matchWins: 0,
+      matchLosses: 0,
+      matchTies: 0,
+      match_diffs: 0,
+      totalScore: 0,
+      history: [],
+      groupId,
+      is_disqualified: p.is_disqualified,
+    };
+  });
+
+  // Aggregate stats
+  matches.forEach((match) => {
+    if (match.group_id === null) return;
+    const p1 = stats[match.player1_id];
+    const p2 = stats[match.player2_id];
+    if (!p1 || !p2 || match.state !== "completed") return;
+
+    const scores = match.scores_csv?.split(",") || [];
+    let p1Total = 0,
+      p2Total = 0;
+
+    scores.forEach((score) => {
+      const [s1, s2] = score.split("-").map(Number);
+      if (!isNaN(s1) && !isNaN(s2)) {
+        p1Total += s1;
+        p2Total += s2;
+        const diff = s1 - s2;
+        p1.match_diffs += diff;
+        p2.match_diffs -= diff;
+        p1.totalScore += s1;
+        p2.totalScore += s2;
+      }
+    });
+
+    if (match.winner_id === p1.participant_id) {
+      p1.matchWins++;
+      p1.history.push("W");
+      p2.matchLosses++;
+      p2.history.push("L");
+    } else if (match.winner_id === p2.participant_id) {
+      p2.matchWins++;
+      p2.history.push("W");
+      p1.matchLosses++;
+      p1.history.push("L");
+    } else {
+      p1.matchTies++;
+      p2.matchTies++;
+      p1.history.push("T");
+      p2.history.push("T");
+    }
+  });
+
+  // Group participants by groupId
+  const groupedStats = {};
+  Object.values(stats).forEach((stat) => {
+    if (!groupedStats[stat.groupId]) groupedStats[stat.groupId] = [];
+    groupedStats[stat.groupId].push(stat);
+  });
+
+  // Sort each group
+  Object.keys(groupedStats).forEach((groupId) => {
+    groupedStats[groupId].sort((a, b) => {
+      const aWins = a.history.filter((h) => h === "W").length;
+      const bWins = b.history.filter((h) => h === "W").length;
+
+      // Step 1: history
+      if (bWins !== aWins) return bWins - aWins;
+
+      // Step 2: match difference
+      if (b.match_diffs !== a.match_diffs) return b.match_diffs - a.match_diffs;
+
+      // Step 3: head-to-head
+      const headToHead = matches.find(
+        (m) =>
+          (m.player1_id === a.participant_id &&
+            m.player2_id === b.participant_id) ||
+          (m.player1_id === b.participant_id &&
+            m.player2_id === a.participant_id)
+      );
+      if (headToHead && headToHead.winner_id) {
+        if (headToHead.winner_id === b.participant_id) return 1;
+        if (headToHead.winner_id === a.participant_id) return -1;
+      }
+
+      // Step 4: fallback to total points
+      return b.totalScore - a.totalScore;
+    });
+  });
+
+  return groupedStats;
+}
+
 const updateGroup = async (id, updatedData, clientt) => {
   const client = clientt || (await pool.connect());
 
@@ -403,4 +521,5 @@ module.exports = {
   updateGroup,
   generateMatchesAfterGroupConfirmation,
   updateGroupParticipants,
+  getSortedGroupStandings,
 };

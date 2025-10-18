@@ -15,6 +15,7 @@ router.post(
 router.get("/", groupController.getGroupsByStageId);
 router.get("/participants", groupController.getParticipantsByGroupId);
 router.get("/group-standings", groupController.getGroupStandings);
+router.get("/sorted-standings", groupController.getSortedGroupStandings);
 
 module.exports = router;
 

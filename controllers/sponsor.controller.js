@@ -20,7 +20,7 @@ async function processLogo(file) {
   const outputPath = path.join(IMAGE_UPLOAD_PATH, filename);
 
   await sharp(file.buffer)
-    .resize({ width: 512, height: 512, fit: "cover" })
+    .resize({ width: 512, height: 512, fit: "inside" })
     .webp({ quality: 80 }) // compress
     .toFile(outputPath);
 

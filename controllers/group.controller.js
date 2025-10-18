@@ -138,6 +138,17 @@ exports.getGroupStandings = async (req, res) => {
   }
 };
 
+exports.getSortedGroupStandings = async (req, res) => {
+  try {
+    const { tournament_id } = req.query;
+    const standings = await groupService.getSortedGroupStandings(tournament_id);
+    res.json(standings);
+  } catch (err) {
+    console.error("Error fetching standings by stage:", err.message);
+    res.status(500).json({ error: "Failed to fetch standings" });
+  }
+};
+
 exports.updateGroup = async (req, res) => {
   const { id } = req.params;
   const groupData = req.body;
