@@ -30,6 +30,26 @@ exports.updateMatch = async (req, res) => {
   }
 };
 
+exports.updateMatchDirect = async (req, res) => {
+  const { id } = req.params;
+  const updatedData = req.body;
+
+  try {
+    const updatedMatch = await matchService.updateMatchDirect(id, updatedData);
+    return res.status(200).json({
+      success: true,
+      message: "Match updated successfully (direct update)",
+      data: updatedMatch,
+    });
+  } catch (err) {
+    console.error("updateMatchDirect controller error:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Failed to update match directly",
+    });
+  }
+};
+
 exports.getAllMatches = async (req, res) => {
   try {
     const matches = await matchService.getAllMatches();

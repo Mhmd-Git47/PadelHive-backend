@@ -48,6 +48,32 @@ const createMatch = async (data) => {
   return result.rows[0];
 };
 
+// to update match without applying any logic for scores
+const updateMatchDirect = async (id, updatedData) => {
+  const client = await pool.connect();
+
+  if (Object.keys(updatedData).length === 0) {
+    throw new Error(`No fields provided to update`);
+  }
+
+  try {
+    await client.query("BEGIN");
+
+    // ✅ Update only the database row
+    const updatedMatch = await updateMatchRow(id, updatedData, client);
+
+    await client.query("COMMIT");
+
+    return updatedMatch;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error in updateMatchDirect:", err);
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 const updateMatch = async (id, updatedData) => {
   const client = await pool.connect();
 
@@ -69,9 +95,9 @@ const updateMatch = async (id, updatedData) => {
     // 3️⃣ Handle group stage
     if (updatedMatch.group_id !== null) {
       await handleGroupStage(updatedMatch, client);
-      const groupStandings = await groupService.getGroupStandings(
-        updatedMatch.tournament_id
-      );
+      // const groupStandings = await groupService.getGroupStandings(
+      //   updatedMatch.tournament_id
+      // );
       // if (global.io) {
       //   global.io
       //     .to(`tournament_${updatedMatch.tournament_id}`)
@@ -188,6 +214,7 @@ async function handleGroupStage(match, client) {
 async function processGroupRankings(match, groupMatches, client) {
   const participantStats = {};
 
+  // Step 1️⃣ — Aggregate all stats
   groupMatches.forEach((m) => {
     const { player1_id, player2_id, winner_id, scores_csv } = m;
     if (!player1_id || !player2_id || !winner_id) return;
@@ -220,17 +247,47 @@ async function processGroupRankings(match, groupMatches, client) {
     });
   });
 
+  // Step 2️⃣ — Calculate matchDiff
   // Rank participants
-  const ranked = Object.values(participantStats)
-    .map((p) => ({ ...p, matchDiff: p.pointsFor - p.pointsAgainst }))
-    .sort(
-      (a, b) =>
-        b.wins - a.wins ||
-        b.matchDiff - a.matchDiff ||
-        b.pointsFor - a.pointsFor
-    );
+  const ranked = Object.values(participantStats).map((p) => ({
+    ...p,
+    matchDiff: p.pointsFor - p.pointsAgainst,
+  }));
+  // .sort(
+  //   (a, b) =>
+  //     b.wins - a.wins ||
+  //     b.matchDiff - a.matchDiff ||
+  //     b.pointsFor - a.pointsFor
+  // );
 
-  // Get tournament info
+  // Step 3️⃣ — Primary sort: wins → matchDiff
+  ranked.sort((a, b) => b.wins - a.wins || b.matchDiff - a.matchDiff);
+
+  // Step 4️⃣ — Secondary head-to-head tie-break for exact ties
+  for (let i = 0; i < ranked.length - 1; i++) {
+    const curr = ranked[i];
+    const next = ranked[i + 1];
+
+    const tied = curr.wins === next.wins && curr.matchDiff === next.matchDiff;
+
+    if (tied) {
+      const directMatch = groupMatches.find(
+        (m) =>
+          (m.player1_id === curr.participant_id &&
+            m.player2_id === next.participant_id) ||
+          (m.player1_id === next.participant_id &&
+            m.player2_id === curr.participant_id)
+      );
+
+      if (directMatch && directMatch.winner_id) {
+        if (directMatch.winner_id === next.participant_id) {
+          [ranked[i], ranked[i + 1]] = [ranked[i + 1], ranked[i]];
+        }
+      }
+    }
+  }
+
+  // Step 5️⃣ — Get advancing participants
   const tournamentRes = await client.query(
     `SELECT participants_advance FROM tournaments WHERE id = $1`,
     [match.tournament_id]
@@ -238,7 +295,7 @@ async function processGroupRankings(match, groupMatches, client) {
   const tournament = tournamentRes.rows[0];
   const qualifiedTeams = ranked.slice(0, tournament.participants_advance);
 
-  // Map stage participants
+  // Step 6️⃣ — Map stage participants
   const groupRes = await client.query(`SELECT * FROM groups WHERE id = $1`, [
     match.group_id,
   ]);
@@ -262,9 +319,21 @@ async function processGroupRankings(match, groupMatches, client) {
     const label = `${groupLetter}${i + 1}`;
     const spId = labelToId[label];
     if (!spId) continue;
-    await stageService.updateStageParticipant(spId, {
-      participant_id: qualifiedTeams[i].participant_id,
-    });
+    const existing = await client.query(
+      `SELECT id FROM stage_participants 
+   WHERE stage_id = $1 AND participant_id = $2`,
+      [finalStageId, qualifiedTeams[i].participant_id]
+    );
+
+    if (existing.rows.length === 0) {
+      await stageService.updateStageParticipant(spId, {
+        participant_id: qualifiedTeams[i].participant_id,
+      });
+    } else {
+      console.log(
+        `⚠️ Participant ${qualifiedTeams[i].participant_id} already in stage ${finalStageId}, skipping.`
+      );
+    }
   }
 }
 
@@ -276,9 +345,13 @@ async function handleFinalStage(match, client) {
     [match.id]
   );
   const nextMatch = nextMatchRes.rows[0];
-  console.log("next match: ", nextMatch.id);
+  console.log(
+    `✅ Query success: ${nextMatchRes.rowCount} matches found for prereq ${match.id}`
+  );
 
-  if (nextMatch) {
+  if (!nextMatch) {
+    console.log(`No next match found for match ${match.id} (probably final)`);
+  } else {
     const winnerStagePlayerId =
       match.winner_id === match.player1_id
         ? match.stage_player1_id
@@ -438,6 +511,7 @@ module.exports = {
   getMatchesByStageId,
   createMatch,
   updateMatch,
+  updateMatchDirect,
   generateMatchesForGroupStage,
   getMatchesByUserId,
 };

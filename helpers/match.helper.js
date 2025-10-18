@@ -337,16 +337,11 @@ async function addMatchToUserHistory(match, client) {
     ].filter(Boolean);
 
     for (const uid of userIds) {
+      const playedAt = match.completed_at || new Date();
+
       await client.query(
         `INSERT INTO user_match_history (user_id, match_id, participant_id, tournament_id, did_win, played_at) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          uid,
-          match.id,
-          participantId,
-          match.tournament_id,
-          didWin,
-          match.completed_at,
-        ]
+        [uid, match.id, participantId, match.tournament_id, didWin, playedAt]
       );
     }
   };

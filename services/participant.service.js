@@ -239,15 +239,26 @@ const disqualifyParticipant = async (tournamentId, participantId) => {
     updatedCount = 0;
   let users = [];
 
+  // ✅ Normalize inputs (avoid trailing-space UUID issue)
+  const cleanTournamentId = tournamentId?.trim?.() || tournamentId;
+  const cleanParticipantId = participantId?.trim?.() || participantId;
+
+  console.log("🟡 [disqualifyParticipant] Starting process...");
+  console.log("Tournament ID:", cleanTournamentId);
+  console.log("Participant ID:", cleanParticipantId);
+
   try {
     await client.query("BEGIN");
+    console.log("✅ Transaction started");
 
     // 1️⃣ Fetch tournament
     const tournamentRes = await client.query(
       `SELECT id, name FROM tournaments WHERE id = $1`,
-      [tournamentId]
+      [cleanTournamentId]
     );
     tournament = tournamentRes.rows[0];
+    console.log("🎾 Tournament found:", tournament);
+
     if (!tournament) throw new AppError("Tournament not found", 404);
 
     // 2️⃣ Mark participant as disqualified
@@ -255,53 +266,87 @@ const disqualifyParticipant = async (tournamentId, participantId) => {
       `UPDATE participants 
        SET is_disqualified = true, updated_at = NOW() 
        WHERE id = $1 RETURNING *`,
-      [participantId]
+      [cleanParticipantId]
     );
     updatedParticipant = disqualifyRes.rows[0];
+    console.log("🚫 Participant disqualified:", updatedParticipant?.id);
+
     if (!updatedParticipant) throw new AppError("Participant not found", 404);
 
     // 3️⃣ Update history
+    console.log("🕓 Updating user tournament history...");
     await client.query(
       `UPDATE user_tournaments_history
        SET status = 'disqualified', updated_at = NOW()
        WHERE participant_id = $1`,
-      [participantId]
+      [cleanParticipantId]
     );
 
-    // 4️⃣ Get matches
+    // 4️⃣ Get matches for this participant
+    console.log("🔍 Fetching matches for participant...");
     const matchesRes = await client.query(
-      `SELECT * FROM matches 
+      `SELECT id, player1_id, player2_id, winner_id, scores_csv, state 
+       FROM matches 
        WHERE tournament_id = $1 
        AND (player1_id = $2 OR player2_id = $2)`,
-      [tournamentId, participantId]
+      [cleanTournamentId, cleanParticipantId]
     );
+
+    console.log("📊 Matches found:", matchesRes.rows.length);
+    if (matchesRes.rows.length === 0) {
+      console.log("⚠️ No matches found for this participant!");
+    }
 
     // 5️⃣ Force opponent wins
     for (const match of matchesRes.rows) {
+      console.log(`➡️ Processing match: ${match.id}`);
+      console.log(`    Player1: ${match.player1_id}`);
+      console.log(`    Player2: ${match.player2_id}`);
+      console.log(`    Winner before: ${match.winner_id}`);
+      console.log(`    Scores before: ${match.scores_csv}`);
+
       let winnerId = null;
       let scores = "6-0";
 
-      if (match.player1_id === participantId) {
+      // Make sure to compare UUIDs as strings
+      if (String(match.player1_id).trim() === String(cleanParticipantId)) {
         winnerId = match.player2_id;
         scores = "0-6";
-      } else if (match.player2_id === participantId) {
+      } else if (
+        String(match.player2_id).trim() === String(cleanParticipantId)
+      ) {
         winnerId = match.player1_id;
         scores = "6-0";
       }
 
       if (winnerId) {
-        await matchHelper.updateMatchHelper(match.id, {
-          winner_id: winnerId,
-          scores_csv: scores,
-          state: "completed",
-        });
-        updatedCount++;
+        console.log(
+          `🏆 Updating match ${match.id}: winner -> ${winnerId}, scores -> ${scores}`
+        );
+
+        try {
+          // Pass client if matchHelper supports it, otherwise log warning
+          await matchHelper.updateMatchHelper(match.id, {
+            winner_id: winnerId,
+            scores_csv: scores,
+            state: "completed",
+          });
+          updatedCount++;
+          console.log(`✅ Match ${match.id} updated successfully`);
+        } catch (updateErr) {
+          console.error(`❌ Failed to update match ${match.id}:`, updateErr);
+        }
+      } else {
+        console.log(
+          `⚠️ No valid opponent found for match ${match.id} — skipping`
+        );
       }
     }
 
-    // 6️⃣ Fetch users linked to this participant
+    // 6️⃣ Fetch linked users
+    console.log("👥 Fetching linked users...");
     const usersRes = await client.query(
-      `SELECT DISTINCT id, name, email 
+      `SELECT DISTINCT id, display_name, email 
        FROM users 
        WHERE id = $1 OR id = $2`,
       [
@@ -310,19 +355,25 @@ const disqualifyParticipant = async (tournamentId, participantId) => {
       ]
     );
     users = usersRes.rows;
+    console.log(
+      "📧 Users linked to participant:",
+      users.map((u) => u.email)
+    );
 
     await client.query("COMMIT");
+    console.log("✅ Transaction committed successfully");
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error("Error disqualifying participant:", err.message);
+    console.error("❌ Error disqualifying participant:", err);
     throw err;
   } finally {
     client.release();
   }
 
-  // 7️⃣ Send disqualification emails (outside transaction)
+  // 7️⃣ Send emails after commit
   try {
     for (const user of users) {
+      console.log(`📨 Sending disqualification email to ${user.email}...`);
       await sendDisqualificationEmail(
         user,
         tournament,
@@ -330,16 +381,21 @@ const disqualifyParticipant = async (tournamentId, participantId) => {
       );
     }
   } catch (err) {
-    console.error("Error sending disqualification emails:", err);
-    // not throwing, since DB updates already committed
+    console.error("⚠️ Error sending disqualification emails:", err);
   }
 
-  // 8️⃣ Emit update event
+  // 8️⃣ Emit socket update
   if (global.io) {
+    console.log("📡 Emitting participant-updated event...");
     global.io
       .to(`tournament_${updatedParticipant.tournament_id}`)
       .emit("participant-updated", updatedParticipant);
   }
+
+  console.log("🎯 Disqualification completed:", {
+    participantId: updatedParticipant.id,
+    updatedMatches: updatedCount,
+  });
 
   return {
     disqualified: updatedParticipant,
