@@ -134,23 +134,23 @@ async function updatePlacementsToTournamentHistory(
   client,
   placement
 ) {
+  // Check if any rows exist (optional)
   const tournamentHistoryRes = await client.query(
-    `SELECT * FROM user_tournaments_history WHERE participant_id = $1 AND tournament_id = $2`,
+    `SELECT id FROM user_tournaments_history 
+     WHERE participant_id = $1 AND tournament_id = $2`,
     [participantId, tournamentId]
   );
 
-  const tournamentHistory = tournamentHistoryRes.rows[0];
-
-  if (tournamentHistory) {
-    // Update existing record
+  if (tournamentHistoryRes.rowCount > 0) {
+    // ✅ Update ALL rows with same participant & tournament
     await client.query(
       `UPDATE user_tournaments_history 
        SET placement = $1, status = 'completed', completed_at = NOW(), updated_at = NOW()
-       WHERE id = $2`,
-      [placement, tournamentHistory.id]
+       WHERE participant_id = $2 AND tournament_id = $3`,
+      [placement, participantId, tournamentId]
     );
   } else {
-    // Insert new record if not exists
+    // Insert new record (if none exist)
     await client.query(
       `INSERT INTO user_tournaments_history 
        (participant_id, tournament_id, placement, status, completed_at, updated_at)

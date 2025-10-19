@@ -29,21 +29,39 @@ async function generateMatchesForStages(tournamentId, stageId, clientt) {
   await stageService.generateFinalStagePlaceholders(tournamentId, clientt);
 }
 
+// function getKFactor(roundName) {
+//   if (!roundName) {
+//     return 28;
+//   }
+
+//   const name = roundName.toLowerCase();
+//   switch (name) {
+//     case "final":
+//       return 40;
+//     case "semi finals":
+//       return 36;
+//     case "quarter finals":
+//       return 32;
+//     default:
+//       return 28;
+//   }
+// }
+
 function getKFactor(roundName) {
   if (!roundName) {
-    return 28;
+    return 32;
   }
 
   const name = roundName.toLowerCase();
   switch (name) {
     case "final":
-      return 40;
+      return 24;
     case "semi finals":
-      return 36;
+      return 28;
     case "quarter finals":
       return 32;
     default:
-      return 28;
+      return 36;
   }
 }
 
@@ -127,6 +145,7 @@ async function updateEloForDoublesMatch(match, client) {
       maxMultiplier: 1.75,
     });
     const K = baseK * dominanceMultiplier;
+    console.log("K factor", K);
 
     // Determine winning team
     const team1Win =
