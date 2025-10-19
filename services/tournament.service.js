@@ -245,7 +245,7 @@ const deleteTournament = async (id) => {
 const getTournamentsByUserId = async (userId) => {
   const tournaments = await pool.query(
     `
-    SELECT tournament_id, participant_id, registered_at, completed_at, cancelled_at
+    SELECT id, tournament_id, participant_id, registered_at, completed_at, cancelled_at,placement
     FROM user_tournaments_history
     WHERE user_id = $1
     ORDER BY registered_at DESC;
