@@ -180,10 +180,8 @@ const getAllTournaments = async () => {
     `SELECT * 
      FROM tournaments 
      WHERE private = $1 
-       AND state != $2
-       
      ORDER BY start_at ASC`,
-    [false, "completed"]
+    [false]
   );
   return result.rows;
 };
