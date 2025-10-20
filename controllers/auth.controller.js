@@ -321,16 +321,27 @@ exports.getUserById = async (req, res, next) => {
   }
 };
 
+exports.getUserViewById = async (req, res, next) => {
+  try {
+    const user = await authService.getUserViewById(req.params.id);
+    res.json(user);
+  } catch (err) {
+    next(err);
+  }
+};
+
 const IMAGE_UPLOAD_PATH = path.join(__dirname, "..", "assets/images/users");
 exports.updateUser = async (req, res, next) => {
   try {
     const userId = req.params.id;
 
     // Ensure the authenticated user matches the user being updated
-    if (req.user.id !== userId) {
-      return res
-        .status(403)
-        .json({ message: "Forbidden: cannot update other users" });
+    if (req.user.role !== "superadmin") {
+      if (req.user.id !== userId) {
+        return res
+          .status(403)
+          .json({ message: "Forbidden: cannot update other users" });
+      }
     }
 
     // Fetch existing user from DB

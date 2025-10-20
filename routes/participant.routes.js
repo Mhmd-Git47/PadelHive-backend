@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const participantController = require("../controllers/participants.controller");
+const { authenticateToken } = require("../middleware/auth.middleware");
 
 router.post("/", participantController.createParticipant);
 router.patch("/:id", participantController.updateParticipant);
@@ -11,7 +12,11 @@ router.get("/", participantController.getAllParticipants);
 router.get("/tournament", participantController.getParticipantsByTournamentId);
 
 // ✅ KEEP THIS LAST
-router.delete("/:id", participantController.deleteParticipant);
+router.delete(
+  "/:id",
+  authenticateToken,
+  participantController.deleteParticipant
+);
 router.get("/:id", participantController.getParticipantById);
 
 router.post("/check-name", participantController.checkParticipantName);

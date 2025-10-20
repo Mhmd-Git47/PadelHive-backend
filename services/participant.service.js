@@ -421,12 +421,19 @@ const deleteParticipant = async (participantId) => {
       client
     );
 
-    // 2️⃣ Delete participant row
+    // 2️⃣ Delete payment data
+    await paymentService.deletePaymentParticipant(
+      participantId,
+      participant.rows[0].tournament_id,
+      client
+    );
+
+    // 3️⃣ Delete participant row
     const res = await client.query(`DELETE FROM participants WHERE id = $1`, [
       participantId,
     ]);
 
-    // 3️⃣ Decrement participants_count in tournaments table
+    // 4️⃣ Decrement participants_count in tournaments table
     const tournamentRes = await client.query(
       `UPDATE tournaments 
         SET participants_count = GREATEST(participants_count - 1, 0)

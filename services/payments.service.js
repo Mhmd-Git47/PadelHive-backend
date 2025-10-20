@@ -199,6 +199,17 @@ const getTournamentPaymentByUserId = async (userId, tournamentId) => {
   return res.rows[0];
 };
 
+const deletePaymentParticipant = async (
+  participantId,
+  tournamentId,
+  client
+) => {
+  await client.query(
+    `DELETE FROM payments WHERE participant_id = $1 AND tournament_id = $2`,
+    [participantId, tournamentId]
+  );
+};
+
 module.exports = {
   createPaymentParticipant,
   getPaymentsByTournamentId,
@@ -206,4 +217,5 @@ module.exports = {
   updatePayment,
   getTournamentPaymentByUserId,
   setPaymentPaid,
+  deletePaymentParticipant,
 };

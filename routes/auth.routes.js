@@ -41,6 +41,7 @@ router.post("/login", authController.login);
 // User management
 router.get("/users", authController.getUsers);
 router.get("/user/:id", authController.getUserById);
+router.get("/user/:id/view", authController.getUserViewById);
 router.put(
   "/user/:id",
   upload.single("image"),

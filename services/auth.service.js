@@ -268,7 +268,7 @@ const verifyRegistrationSms = async (pending_id, otp) => {
   return result.rows[0];
 };
 
- const registerUserFromAdm = async ({
+const registerUserFromAdm = async ({
   first_name,
   last_name,
   email,
@@ -715,7 +715,7 @@ const verifyAndInsertUser = async (token) => {
 
 const getUsers = async () => {
   const result =
-    await pool.query(`SELECT id, email, first_name, last_name, date_of_birth, gender, image_url, phone_number, nationality, address, created_at, updated_at, elo_rate, user_status, display_name, category, rank
+    await pool.query(`SELECT id, email, first_name, last_name, date_of_birth, gender, image_url, phone_number, nationality, address, created_at, updated_at, elo_rate, display_name, category, rank
      FROM users`);
   return result.rows;
 };
@@ -723,6 +723,21 @@ const getUsers = async () => {
 const getUserById = async (userId) => {
   const result = await pool.query(
     `SELECT id, email, first_name, last_name, date_of_birth, gender, image_url, phone_number, nationality, address, created_at, updated_at, elo_rate, user_status, display_name, rank 
+     FROM users
+     WHERE id = $1`,
+    [userId]
+  );
+
+  if (result.rows.length === 0) {
+    throw new AppError("Invalid email or password", 404);
+  }
+
+  return result.rows[0];
+};
+
+const getUserViewById = async (userId) => {
+  const result = await pool.query(
+    `SELECT id, first_name, last_name, gender, image_url, elo_rate, display_name, rank 
      FROM users
      WHERE id = $1`,
     [userId]
@@ -962,4 +977,5 @@ module.exports = {
   verifyRegistrationSms,
   resendEmailVerification,
   resendSmsOtp,
+  getUserViewById,
 };
