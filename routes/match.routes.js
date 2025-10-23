@@ -35,6 +35,14 @@ router.get("/", matchesController.getMatchesByTournamentId);
 router.get("/user/:userId", matchesController.getMatchesByUserId);
 router.get("/:id", matchesController.getMatchById);
 
+// delete matches
+router.delete(
+  "/:tournamentId",
+  authenticateToken,
+  authorizeRoles("company_admin", "location_admin"),
+  matchesController.deleteTournamentMatches
+);
+
 module.exports = router;
 
 // router.patch("/:id", matchesController.updateMatch);

@@ -51,20 +51,36 @@ const createGroupsWithParticipants = async (
 
     const createdGroups = [];
     let i = 0;
+
     for (const group of groupsData) {
+      // scheduled_time is optional
+      const scheduledTime = group.scheduled_time || null;
+
       const groupResult = await client.query(
-        `INSERT INTO groups (tournament_id, name, group_index, created_at, updated_at, stage_id)
-                VALUES ($1, $2,$3, NOW(), NOW(), $4) RETURNING *;`,
-        [tournamentId, group.name, i, stageId]
+        `INSERT INTO groups (
+           tournament_id, 
+           name, 
+           group_index, 
+           scheduled_time, 
+           created_at, 
+           updated_at, 
+           stage_id
+         )
+         VALUES ($1, $2, $3, $4, NOW(), NOW(), $5)
+         RETURNING *;`,
+        [tournamentId, group.name, i, scheduledTime, stageId]
       );
+
       i++;
+
       const createdGroup = groupResult.rows[0];
       createdGroups.push(createdGroup);
 
+      // Add participants for this group
       for (const pid of group.participantIds) {
         await client.query(
           `INSERT INTO group_participants (group_id, participant_id) 
-            VALUES ($1, $2);`,
+           VALUES ($1, $2);`,
           [createdGroup.id, pid]
         );
       }
@@ -88,6 +104,7 @@ const createGroupsWithParticipants = async (
         groups: groupsWithParticipants,
       });
     }
+
     return createdGroups;
   } catch (err) {
     await client.query("ROLLBACK");

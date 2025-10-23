@@ -187,26 +187,27 @@ async function updateEloForDoublesMatch(match, client) {
     // 🔑 Recalculate ranks ONLY for categories affected in this match
     await client.query(
       `
-      WITH affected_categories AS (
-        SELECT DISTINCT LEFT(category,1) AS base_cat
-        FROM users
-        WHERE id = ANY($1::uuid[])
-      ),
-      ranked AS (
-        SELECT id,
-              ROW_NUMBER() OVER (
-                PARTITION BY LEFT(category,1)
-                ORDER BY elo_rate DESC
-              ) AS new_rank
-        FROM users
-        WHERE LEFT(category,1) IN (SELECT base_cat FROM affected_categories)
-      )
-      UPDATE users u
-      SET rank = r.new_rank
-      FROM ranked r
-      WHERE u.id = r.id;
-
-      `,
+  WITH affected_categories AS (
+    SELECT DISTINCT LEFT(category,1) AS base_cat, gender
+    FROM users
+    WHERE id = ANY($1::uuid[])
+  ),
+  ranked AS (
+    SELECT id,
+           ROW_NUMBER() OVER (
+             PARTITION BY LEFT(category,1), gender
+             ORDER BY elo_rate DESC
+           ) AS new_rank
+    FROM users
+    WHERE (LEFT(category,1), gender) IN (
+      SELECT base_cat, gender FROM affected_categories
+    )
+  )
+  UPDATE users u
+  SET rank = r.new_rank
+  FROM ranked r
+  WHERE u.id = r.id;
+  `,
       [affectedUserIds]
     );
 

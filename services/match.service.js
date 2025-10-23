@@ -11,6 +11,7 @@ const {
 const { generateRoundRobin } = require("../helpers/roundRobin");
 const groupService = require("./group.service");
 const stageService = require("./stage.service");
+const { AppError } = require("../utils/errors");
 
 const getAllMatches = async () => {
   const matches = await pool.query(`SELECT * FROM matches ORDER BY id`);
@@ -548,6 +549,56 @@ const getMatchesByUserId = async (userId) => {
   return matches.rows;
 };
 
+// delete matches groupstage + final stage
+const deleteTournamentMatches = async (tournamentId) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    // 1. Check if tournament exists
+    const tournamentRes = await client.query(
+      `SELECT 1 FROM tournaments WHERE id = $1`,
+      [tournamentId]
+    );
+
+    if (tournamentRes.rowCount === 0) {
+      throw new AppError("Tournament not available.", 420);
+    }
+
+    // 2. Get Final Stage ID
+    const finalStageRes = await client.query(
+      `SELECT id FROM stages WHERE tournament_id = $1 AND name = $2`,
+      [tournamentId, "Final Stage"]
+    );
+
+    const finalStageId = finalStageRes.rows?.[0]?.id;
+
+    if (!finalStageId) {
+      throw new AppError("Final Stage not found.", 421);
+    }
+
+    // 3. Delete stage participants (for fresh matches)
+    await client.query(`DELETE FROM stage_participants WHERE stage_id = $1`, [
+      finalStageId,
+    ]);
+
+    // 4. Delete matches for the tournament
+    await client.query(`DELETE FROM matches WHERE tournament_id = $1`, [
+      tournamentId,
+    ]);
+
+    // 5. Commit transaction
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error in deleteMatches:", err);
+    throw new AppError("Failed removing matches", 400);
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getAllMatches,
   getMatchesByTournamentId,
@@ -558,4 +609,5 @@ module.exports = {
   updateMatchDirect,
   generateMatchesForGroupStage,
   getMatchesByUserId,
+  deleteTournamentMatches,
 };

@@ -121,3 +121,18 @@ exports.getMatchesByUserId = async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
+
+exports.deleteTournamentMatches = async (req, res, next) => {
+  const tournamentId = parseInt(req.params.tournamentId, 10);
+
+  if (isNaN(tournamentId)) {
+    return res.status(400).json({ message: "Invalid tournament ID" });
+  }
+
+  try {
+    await matchService.deleteTournamentMatches(tournamentId);
+    return res.status(200).json({ message: "Matches successfully deleted." });
+  } catch (error) {
+    next(error);
+  }
+};
