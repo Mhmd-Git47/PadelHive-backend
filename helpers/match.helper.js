@@ -49,20 +49,25 @@ async function generateMatchesForStages(tournamentId, stageId, clientt) {
 
 function getKFactor(roundName) {
   if (!roundName) {
-    return 32;
+    return 24;
   }
 
   const name = roundName.toLowerCase();
   switch (name) {
     case "final":
-      return 24;
+      return 18;
     case "semi finals":
-      return 28;
+      return 20;
     case "quarter finals":
-      return 32;
+      return 22;
     default:
-      return 36;
+      return 24;
   }
+}
+
+// if value > max, then return max and viceverse
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
 async function updateEloForDoublesMatch(match, client) {
@@ -141,11 +146,10 @@ async function updateEloForDoublesMatch(match, client) {
     // K factor based on round
     const baseK = getKFactor(match.round_name);
     const dominanceMultiplier = dominanceToMultiplier(dominance, {
-      impact: 0.5,
-      maxMultiplier: 1.75,
+      impact: 0.25,
+      maxMultiplier: 1.25,
     });
     const K = baseK * dominanceMultiplier;
-    console.log("K factor", K);
 
     // Determine winning team
     const team1Win =
@@ -162,6 +166,9 @@ async function updateEloForDoublesMatch(match, client) {
     await Promise.all(
       team1Users.map(async (user) => {
         const newElo = parseElo(user) + K * (team1Win - expectedTeam1);
+        // if wanna apply logic of max/min, uncomment this
+        // const delta = clamp(K * (team1Win - expectedTeam1), -15, 15);
+        // const newElo = parseElo(user) + delta;
         const newCategory = getCategoryByElo(newElo);
         affectedUserIds.push(user.id);
         await client.query(
@@ -175,6 +182,9 @@ async function updateEloForDoublesMatch(match, client) {
     await Promise.all(
       team2Users.map(async (user) => {
         const newElo = parseElo(user) + K * (1 - team1Win - expectedTeam2);
+        // if wanna apply logic of max/min, uncomment this
+        // const delta = clamp(K * (1 - team1Win - expectedTeam2), -15, 15);
+        // const newElo = parseElo(user) + delta;
         const newCategory = getCategoryByElo(newElo);
         affectedUserIds.push(user.id);
         await client.query(
@@ -313,7 +323,7 @@ function computeDominance(
 
 function dominanceToMultiplier(
   dominance,
-  { impact = 0.3, maxMultiplier = 1.6 } = {}
+  { impact = 0.2, maxMultiplier = 1.25 } = {}
 ) {
   const multiplier = 1 + dominance * impact;
   return Math.min(multiplier, maxMultiplier);

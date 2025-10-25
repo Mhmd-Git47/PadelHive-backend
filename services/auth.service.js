@@ -616,7 +616,7 @@ const loginUser = async ({ identifier, password }) => {
   const token = jwt.sign(
     { id: user.id, role: "user" },
     process.env.JWT_SECRET,
-    { expiresIn: "2h" }
+    { expiresIn: "4h" }
   );
 
   return {
@@ -722,7 +722,7 @@ const getUsers = async () => {
 
 const getUserById = async (userId) => {
   const result = await pool.query(
-    `SELECT id, email, first_name, last_name, date_of_birth, gender, image_url, phone_number, nationality, address, created_at, updated_at, elo_rate, user_status, display_name, rank 
+    `SELECT id, email, first_name, last_name,category, date_of_birth, gender, image_url, phone_number, nationality, address, created_at, updated_at, elo_rate, user_status, display_name, rank 
      FROM users
      WHERE id = $1`,
     [userId]
@@ -737,7 +737,7 @@ const getUserById = async (userId) => {
 
 const getUserViewById = async (userId) => {
   const result = await pool.query(
-    `SELECT id, first_name, last_name, gender, image_url, elo_rate, display_name, rank 
+    `SELECT id, first_name, last_name, category, gender, image_url, elo_rate, display_name, rank 
      FROM users
      WHERE id = $1`,
     [userId]
