@@ -59,7 +59,7 @@ const loginAdmin = async ({ username, password }) => {
       location_id: user.location_id || null,
     },
     process.env.JWT_SECRET || "SECRET_KEY",
-    { expiresIn: "1h" }
+    { expiresIn: "2h" }
   );
   return token;
 };
@@ -958,6 +958,181 @@ const resetPasswordWithOtp = async ({ email, otp, newPassword }) => {
   return { message: "Password reset successful" };
 };
 
+// change display name
+// 1st verify password if correct
+const verifyPassword = async (identifier, password, userId) => {
+  if (!identifier || !password) return { isVerified: false };
+
+  // 1️⃣ Get current logged-in user
+  const { rows, rowCount } = await pool.query(
+    `SELECT id, email, display_name, password FROM users WHERE id = $1`,
+    [userId]
+  );
+
+  if (rowCount === 0) {
+    throw new AppError(
+      "Your session may have expired. Please log in again to continue.",
+      401
+    );
+  }
+
+  const currentUser = rows[0];
+  const { email, display_name } = currentUser;
+
+  // 2️⃣ Validate identifier ownership
+  if (identifier !== email && identifier !== display_name) {
+    throw new AppError("You can only verify your own credentials.", 403);
+  }
+
+  // 3️⃣ Split for comparison logic
+  const firstChar = display_name[0];
+  const rest = display_name.slice(1);
+
+  // 4️⃣ Match the logged-in user directly (no need to re-query other users)
+  // const firstLetterMatches =
+  //   identifier[0].toLowerCase() === firstChar.toLowerCase();
+  // const restMatches = identifier.slice(1) === rest;
+
+  // if (!firstLetterMatches || !restMatches) {
+  //   console.log("ddd");
+  //   return { isVerified: false };
+  // }
+
+  // 5️⃣ Check password hash
+  const valid = await bcrypt.compare(password, currentUser.password);
+
+  return { isVerified: valid, userId: valid ? userId : null };
+};
+
+// 2nd change display name
+const changeDisplayName = async (userId, newDisplayName) => {
+  // 1️⃣ Validate format
+  const nameRegex = /^[A-Za-z0-9_]{3,20}$/;
+  if (!nameRegex.test(newDisplayName)) {
+    throw new AppError(
+      "Display name must be 3–20 characters long and contain only letters, numbers, or underscores.",
+      400
+    );
+  }
+
+  // 2️⃣ Ensure user exists
+  const userCheck = await pool.query(`SELECT id FROM users WHERE id = $1`, [
+    userId,
+  ]);
+  if (userCheck.rowCount === 0) {
+    throw new AppError(
+      "Your session may have expired. Please log in again.",
+      401
+    );
+  }
+
+  // 3️⃣ Ensure display name is unique (case-insensitive)
+  const duplicateCheck = await pool.query(
+    `SELECT id FROM users WHERE LOWER(display_name) = LOWER($1) AND id != $2`,
+    [newDisplayName, userId]
+  );
+
+  if (duplicateCheck.rowCount > 0) {
+    throw new AppError("This display name is already taken.", 409);
+  }
+
+  // 4️⃣ Update display name
+  const updateResult = await pool.query(
+    `UPDATE users SET display_name = $1 WHERE id = $2 RETURNING id, display_name`,
+    [newDisplayName, userId]
+  );
+
+  return updateResult.rows[0];
+};
+
+const changePhoneNumber = async (userId, countryCode, phoneNumber) => {
+  // 1️⃣ Validate input existence
+  if (!countryCode || !phoneNumber) {
+    throw new AppError("Country code and phone number are required.", 400);
+  }
+
+  // 2️⃣ Validate phone number format — numbers only, 6–15 digits (international safe range)
+  const phoneRegex = /^[0-9]{6,15}$/;
+  if (!phoneRegex.test(phoneNumber)) {
+    throw new AppError(
+      "Invalid phone number format. It must contain 6–15 digits only.",
+      400
+    );
+  }
+
+  // 3️⃣ Ensure user exists
+  const userCheck = await pool.query(`SELECT id FROM users WHERE id = $1`, [
+    userId,
+  ]);
+  if (userCheck.rowCount === 0) {
+    throw new AppError(
+      "Your session may have expired. Please log in again.",
+      401
+    );
+  }
+
+  // 4️⃣ Ensure phone number is unique (global uniqueness)
+  const duplicateCheck = await pool.query(
+    `SELECT id FROM users WHERE country_code = $1 AND phone_number = $2 AND id != $3`,
+    [countryCode, phoneNumber, userId]
+  );
+
+  if (duplicateCheck.rowCount > 0) {
+    throw new AppError("This phone number is already registered.", 409);
+  }
+
+  // 5️⃣ Update phone info
+  const updateResult = await pool.query(
+    `UPDATE users 
+     SET country_code = $1, phone_number = $2
+     WHERE id = $3 
+     RETURNING id, country_code, phone_number`,
+    [countryCode, phoneNumber, userId]
+  );
+
+  return updateResult.rows[0];
+};
+
+const changePassword = async (oldPassword, newPassword, userId) => {
+  // 1️⃣ Input validation
+  if (!oldPassword || !newPassword) {
+    throw new AppError("Password is required.", 400);
+  }
+
+  // 2️⃣ Fetch user
+  const userRes = await pool.query(
+    `SELECT id, password FROM users WHERE id = $1`,
+    [userId]
+  );
+
+  if (userRes.rowCount === 0) {
+    throw new AppError(
+      "Your session may have expired. Please log in again.",
+      401
+    );
+  }
+
+  const user = userRes.rows[0];
+
+  // 3️⃣ Compare passwords
+  const isMatch = await bcrypt.compare(oldPassword, user.password);
+  if (!isMatch) {
+    throw new AppError("Incorrect current password.", 401);
+  }
+
+  // 4️⃣ Hash new password
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+  // 5️⃣ Update password
+  await pool.query(`UPDATE users SET password = $1 WHERE id = $2`, [
+    hashedPassword,
+    user.id,
+  ]);
+
+  // 6️⃣ Optional: log the change or return confirmation
+  return { message: "Password updated successfully." };
+};
+
 module.exports = {
   registerAdmin,
   loginAdmin,
@@ -978,4 +1153,8 @@ module.exports = {
   resendEmailVerification,
   resendSmsOtp,
   getUserViewById,
+  verifyPassword,
+  changeDisplayName,
+  changePhoneNumber,
+  changePassword,
 };

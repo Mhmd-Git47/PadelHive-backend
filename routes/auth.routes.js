@@ -81,4 +81,30 @@ router.post("/register/sms/verify", authController.verifyRegistrationSms);
 // Resend OTP
 router.post("/register/sms/resend", authController.resendSmsOtp);
 
+// confirm password
+router.post(
+  "/verify-password",
+  authenticateToken,
+  authController.verifyPassword
+);
+
+// change display name after confirming password
+router.put(
+  "/change-display-name",
+  authenticateToken,
+  authController.changeDisplayName
+);
+
+router.put(
+  "/change-phone-number",
+  authenticateToken,
+  authController.changePhoneNumber
+);
+
+router.put(
+  "/change-password",
+  authenticateToken,
+  authController.changePassword
+);
+
 module.exports = router;

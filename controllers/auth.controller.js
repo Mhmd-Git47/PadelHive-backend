@@ -478,3 +478,94 @@ exports.resetPasswordOtp = async (req, res, next) => {
     next(err);
   }
 };
+
+// verify if password is correct
+exports.verifyPassword = async (req, res, next) => {
+  try {
+    const { identifier, password } = req.body;
+    const userId = req.user?.id;
+    if (!identifier || !password) {
+      return res
+        .status(400)
+        .json({ message: "Identifier and password are required." });
+    }
+
+    const result = await authService.verifyPassword(
+      identifier,
+      password,
+      userId
+    );
+
+    return res.json(result);
+  } catch (err) {
+    console.error("Error verifying password: ", err);
+    next(err);
+  }
+};
+
+// change display name
+exports.changeDisplayName = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { newDisplayName } = req.body;
+
+    if (!newDisplayName) {
+      return res.status(400).json({ message: "Display name is required." });
+    }
+
+    const result = await authService.changeDisplayName(userId, newDisplayName);
+
+    return res.status(200).json({
+      message: "Display name updated successfully.",
+      user: result,
+    });
+  } catch (err) {
+    console.error("Error changing display name:", err);
+    next(err);
+  }
+};
+
+exports.changePhoneNumber = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { countryCode, phoneNumber } = req.body;
+
+    const updated = await authService.changePhoneNumber(
+      userId,
+      countryCode,
+      phoneNumber
+    );
+
+    res.status(200).json({
+      message: "Phone number updated successfully.",
+      user: updated,
+    });
+  } catch (err) {
+    console.error("Error updating phone number:", err);
+    next(err);
+  }
+};
+
+exports.changePassword = async (req, res, next) => {
+  try {
+    const userId = req.user?.id;
+    const { oldPassword, newPassword } = req.body;
+
+    if (!userId) {
+      throw new AppError("Unauthorized. Please log in again.", 401);
+    }
+
+    const result = await authService.changePassword(
+      oldPassword,
+      newPassword,
+      userId
+    );
+
+    res.status(200).json({
+      success: true,
+      message: result.message,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
