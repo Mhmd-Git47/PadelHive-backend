@@ -339,6 +339,85 @@ const sendPasswordResetOtpEmail = async (email, otp) => {
   });
 };
 
+async function sendPaymentReminderEmail(user, tournament) {
+  const subject = `💳 Payment Reminder — ${tournament.name} Tournament`;
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937;">
+      <p>Hi <b>${user.display_name}</b>,</p>
+
+      <p>We noticed your registration for the <b>${
+        tournament.name
+      }</b> tournament is still <b>pending payment</b>.</p>
+
+      <p>To confirm your spot, please complete your payment of 
+      <b>$${
+        tournament.entry_fee ? tournament.entry_fee : "—"
+      }</b> before the deadline. Once your payment is confirmed, your team will be officially added to the tournament lineup.</p>
+
+      <p>Here’s a quick reminder of the event details:</p>
+      <ul>
+        <li><b>Tournament:</b> ${tournament.name}</li>
+        <li><b>Category:</b> ${tournament.category}</li>
+        <li><b>Start Date:</b> ${formatDate(tournament.start_at)}</li>
+      </ul>
+
+      <p>⚠️ <b>Note:</b> Unpaid registrations may be released to other players after the payment deadline, so please make sure to complete your payment in time to secure your place.</p>
+
+      <p>If you’ve already made the payment, you can safely ignore this message — it may still be processing.</p>
+
+      <p>See you soon on the court,<br>
+      <b>The PadelHiveLB Team</b></p>
+
+      <img 
+        src="https://padelhivelb.com/assets/images/icons/FULL-LOGO-1200X630-16.jpg" 
+        alt="PadelHive Logo" 
+        draggable="false"
+        style="
+          display: block;
+          max-width: 300px;
+          width: 100%;
+          height: auto;
+          margin: 20px 0 0;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+          user-select: none;
+        "
+      ></img>
+    </div>
+  `;
+
+  const text = `
+Hi ${user.display_name},
+
+This is a friendly reminder that your registration for the ${
+    tournament.name
+  } tournament is still pending payment.
+
+Please complete your payment of $${
+    tournament.entry_fee ? tournament.entry_fee : "—"
+  } before the deadline to confirm your spot.
+
+Event details:
+- Tournament: ${tournament.name}
+- Category: ${tournament.category}
+- Start Date: ${formatDate(tournament.start_at)}
+
+Important: Unpaid spots may be released to other players after the deadline.
+
+If you’ve already paid, please disregard this message.
+
+See you on the court,
+The PadelHiveLB Team
+  `;
+
+  return emailService.sendEmail({
+    to: user.email,
+    subject,
+    html,
+    text,
+  });
+}
+
 module.exports = {
   sendWelcomeEmail,
   sendTournamentJoinEmail,
@@ -347,4 +426,5 @@ module.exports = {
   sendPasswordResetSuccessEmail,
   sendPasswordResetOtpEmail,
   sendTournamentPaymentConfirmationEmail,
+  sendPaymentReminderEmail,
 };

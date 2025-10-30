@@ -26,6 +26,12 @@ router.post(
   authController.registerAdm
 );
 router.post("/login-admin", authController.loginAdm);
+router.delete(
+  "/:id",
+  authenticateToken,
+  authorizeRoles("superadmin"),
+  authController.deleteAdminController
+);
 
 // ------------------ User Routes ------------------
 // Registration with optional profile image
@@ -35,6 +41,7 @@ router.post(
   authorizeRoles("superadmin"),
   authController.registerUserFromAdmin
 );
+
 router.post("/register", upload.single("image_url"), authController.register);
 router.post("/login", authController.login);
 
@@ -105,6 +112,14 @@ router.put(
   "/change-password",
   authenticateToken,
   authController.changePassword
+);
+
+// update admin
+router.put(
+  "/admins/:id",
+  authenticateToken,
+  authorizeRoles("superadmin"),
+  authController.updateAdminBySuperController
 );
 
 module.exports = router;

@@ -2,6 +2,7 @@ const pool = require("../db");
 const { AppError } = require("../utils/errors");
 const {
   sendTournamentPaymentConfirmationEmail,
+  sendPaymentReminderEmail,
 } = require("../helpers/email.helper");
 
 const createPaymentParticipant = async (participantData, client) => {
@@ -210,6 +211,40 @@ const deletePaymentParticipant = async (
   );
 };
 
+const sendReminderPayment = async (userId, tournamentId) => {
+  const paymentRes = await pool.query(
+    `SELECT amount, due_date FROM payments WHERE user_id = $1 AND tournament_id = $2`,
+    [userId, tournamentId]
+  );
+
+  const payment = paymentRes.rows[0];
+  if (!payment) {
+    throw new AppError(
+      "No Payment found for the user in this tournament.",
+      404
+    );
+  }
+
+  const userRes = await pool.query(
+    `SELECT id, email, display_name FROM users WHERE id = $1`,
+    [userId]
+  );
+  const user = userRes.rows[0];
+
+  const tournamentRes = await pool.query(
+    `SELECT id, name, start_at, category FROM tournaments WHERE id = $1`,
+    [tournamentId]
+  );
+  const tournament = tournamentRes.rows[0];
+
+  if (user && tournament) {
+    await sendPaymentReminderEmail(user, {
+      ...tournament,
+      entry_fee: payment.amount,
+    });
+  }
+};
+
 module.exports = {
   createPaymentParticipant,
   getPaymentsByTournamentId,
@@ -218,4 +253,5 @@ module.exports = {
   getTournamentPaymentByUserId,
   setPaymentPaid,
   deletePaymentParticipant,
+  sendReminderPayment,
 };

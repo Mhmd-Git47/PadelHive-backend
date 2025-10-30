@@ -38,4 +38,11 @@ router.put(
   paymentController.updatePayment
 );
 
+router.post(
+  "/send-reminder",
+  authenticateToken,
+  authorizeRoles("company_admin", "location_admin"),
+  paymentController.sendReminderPayment
+);
+
 module.exports = router;

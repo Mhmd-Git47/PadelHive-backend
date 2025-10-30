@@ -89,3 +89,17 @@ exports.getTournamentPaymentsByUserId = async (req, res) => {
     res.status(500).json({ error: "Failed to get payments" });
   }
 };
+
+exports.sendReminderPayment = async (req, res, next) => {
+  const userId = req.body.userId;
+  const tournamentId = req.body.tournamentId;
+
+  try {
+    await paymentService.sendReminderPayment(userId, tournamentId);
+    res
+      .status(200)
+      .json({ message: "Payment reminder email sent successfully." });
+  } catch (err) {
+    next(err);
+  }
+};

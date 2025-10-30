@@ -6,9 +6,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const path = require("path");
 const fs = require("fs");
-const crypto = require("crypto");
 const { generateOtp, hashOtp, verifyOtp } = require("../utils/otp");
-const sharp = require("sharp");
 const { sendSms } = require("../services/twilio.service");
 const {
   sendWelcomeEmail,
@@ -64,6 +62,51 @@ const loginAdmin = async ({ username, password }) => {
   return token;
 };
 
+const updateAdminBySuper = async (id, newUsername, newPassword) => {
+  // 1️⃣ Check if admin exists
+  const adminRes = await pool.query(`SELECT id FROM admins WHERE id = $1`, [
+    id,
+  ]);
+
+  if (adminRes.rowCount === 0) {
+    throw new AppError("Admin not found", 404);
+  }
+
+  // 2️⃣ Build dynamic query
+  const fields = [];
+  const values = [];
+  let index = 1;
+
+  if (newUsername) {
+    fields.push(`username = $${index++}`);
+    values.push(newUsername);
+  }
+
+  if (newPassword) {
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    fields.push(`password = $${index++}`);
+    values.push(hashedPassword);
+  }
+
+  // 3️⃣ Prevent empty updates
+  if (fields.length === 0) {
+    throw new AppError("No fields to update", 400);
+  }
+
+  // 4️⃣ Add WHERE condition
+  const query = `
+    UPDATE admins
+    SET ${fields.join(", ")}
+    WHERE id = $${index}
+    RETURNING id, username, role;
+  `;
+  values.push(id);
+
+  // 5️⃣ Execute
+  const result = await pool.query(query, values);
+  return result.rows[0];
+};
+
 const updateAdmin = async (id, updatedData, clientt) => {
   const client = clientt || (await pool.connect());
   const isClientProvided = !!clientt;
@@ -107,6 +150,99 @@ const updateAdmin = async (id, updatedData, clientt) => {
     if (!isClientProvided) {
       client.release();
     }
+  }
+};
+
+const deleteAdmin = async (id) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const adminRes = await client.query(
+      `SELECT id, username, location_id, company_id, role 
+       FROM admins 
+       WHERE id = $1`,
+      [id]
+    );
+
+    if (adminRes.rowCount === 0) {
+      throw new AppError("Admin not found", 404);
+    }
+
+    const admin = adminRes.rows[0];
+
+    // === SUPERADMIN ===
+    if (admin.role === "superadmin") {
+      await client.query(`DELETE FROM admins WHERE id = $1`, [id]);
+      console.log("✅ Superadmin deleted successfully");
+    }
+
+    // === COMPANY ADMIN ===
+    else if (admin.role === "company_admin") {
+      // 1️⃣ Get all related location IDs before deleting
+      const locRes = await client.query(
+        `SELECT id FROM locations WHERE company_id = $1`,
+        [admin.company_id]
+      );
+      const locationIds = locRes.rows.map((l) => l.id);
+
+      // 2️⃣ Nullify references from admins first
+      await client.query(
+        `UPDATE admins SET company_id = NULL, location_id = NULL WHERE company_id = $1`,
+        [admin.company_id]
+      );
+
+      // 3️⃣ Delete locations linked to this company
+      if (locationIds.length > 0) {
+        await client.query(`DELETE FROM locations WHERE company_id = $1`, [
+          admin.company_id,
+        ]);
+      }
+
+      // 4️⃣ Delete the company
+      await client.query(`DELETE FROM companies WHERE id = $1`, [
+        admin.company_id,
+      ]);
+
+      // 5️⃣ Delete the admin
+      await client.query(`DELETE FROM admins WHERE id = $1`, [id]);
+
+      console.log("✅ Company admin, company, and locations deleted");
+    }
+
+    // === LOCATION ADMIN ===
+    else if (admin.role === "location_admin") {
+      if (admin.location_id) {
+        const locationId = admin.location_id;
+
+        // 1️⃣ Set foreign keys to NULL first
+        await client.query(
+          `UPDATE admins SET location_id = NULL, company_id = NULL WHERE id = $1`,
+          [id]
+        );
+
+        // 2️⃣ Delete the location now that the reference is removed
+        await client.query(`DELETE FROM locations WHERE id = $1`, [locationId]);
+      }
+
+      // 3️⃣ Finally delete the admin itself
+      await client.query(`DELETE FROM admins WHERE id = $1`, [id]);
+      console.log("✅ Location admin and location deleted");
+    }
+
+    // === UNKNOWN ROLE ===
+    else {
+      throw new AppError(`Unknown admin role: ${admin.role}`, 400);
+    }
+
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("❌ Error deleting admin:", err.message);
+    throw err;
+  } finally {
+    client.release();
   }
 };
 
@@ -1137,8 +1273,10 @@ module.exports = {
   registerAdmin,
   loginAdmin,
   updateAdmin,
+  updateAdminBySuper,
   registerUserFromAdm,
   registerUser,
+  deleteAdmin,
   loginUser,
   verifyAndInsertUser,
   getUserById,

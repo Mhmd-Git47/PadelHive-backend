@@ -2,6 +2,7 @@ const authService = require("../services/auth.service");
 const path = require("path");
 const fs = require("fs");
 const sharp = require("sharp");
+const { AppError } = require("../utils/errors");
 
 exports.registerAdm = async (req, res, next) => {
   try {
@@ -18,6 +19,53 @@ exports.loginAdm = async (req, res, next) => {
     const token = await authService.loginAdmin(req.body);
     res.json({ token });
   } catch (err) {
+    next(err);
+  }
+};
+// ----------------------------
+// Delete admin
+// ----------------------------
+exports.deleteAdminController = async (req, res, next) => {
+  const { id } = req.params;
+
+  try {
+    const result = await authService.deleteAdmin(id);
+
+    res.status(200).json({
+      success: true,
+      message: "Admin deleted successfully",
+    });
+  } catch (err) {
+    console.error("❌ Controller error:", err.message);
+    next(err);
+  }
+};
+
+// ----------------------------
+// Update admin
+// ----------------------------
+exports.updateAdminBySuperController = async (req, res, next) => {
+  const { id } = req.params;
+  const { username, password } = req.body;
+
+  try {
+    if (!username && !password) {
+      throw new AppError("No fields provided to update", 400);
+    }
+
+    const updatedAdmin = await authService.updateAdminBySuper(
+      id,
+      username,
+      password
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Admin updated successfully",
+      data: updatedAdmin,
+    });
+  } catch (err) {
+    console.error("❌ Controller error:", err.message);
     next(err);
   }
 };
