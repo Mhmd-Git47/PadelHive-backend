@@ -7,7 +7,6 @@ const jwt = require("jsonwebtoken");
 const path = require("path");
 const fs = require("fs");
 const { generateOtp, hashOtp, verifyOtp } = require("../utils/otp");
-const { sendSms } = require("../services/twilio.service");
 const {
   sendWelcomeEmail,
   sendPasswordResetSuccessEmail,
@@ -404,7 +403,7 @@ const verifyRegistrationSms = async (pending_id, otp) => {
   return result.rows[0];
 };
 
-const registerUserFromAdm = async ({
+const registerUserFromSuperAdm = async ({
   first_name,
   last_name,
   email,
@@ -456,7 +455,7 @@ const registerUserFromAdm = async ({
       gender, password, elo_rate, category, display_name, created_at
     )
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
-    RETURNING id, email, display_name, category
+    RETURNING id, email, display_name, category, first_name, last_name, phone_number, created_at
   `;
 
   const insertRes = await pool.query(insertQuery, [
@@ -472,9 +471,93 @@ const registerUserFromAdm = async ({
     display_name,
   ]);
 
+  const newUser = insertRes.rows[0];
+
+  if (global.io) {
+    global.io.to("users_room").emit("usersUpdated", {
+      action: "create",
+      user: newUser,
+      message: `${newUser.display_name} has been added`,
+    });
+  }
+
   return {
     message: "User successfully created",
     user: insertRes.rows[0],
+  };
+};
+
+const registerUserFromAdm = async ({
+  gender,
+  display_name,
+  elo_rate,
+  category,
+}) => {
+  // 🧩 Generate a fake system email
+  const email = `${display_name
+    .toLowerCase()
+    .replace(/\s+/g, "")}@padelhive.fake`;
+
+  // 1️⃣ Check for duplicates
+  const checkQuery = `
+    SELECT 
+      CASE 
+        WHEN email = $1 THEN 'email'
+        WHEN display_name = $2 THEN 'display_name'
+      END AS conflict_field
+    FROM users
+    WHERE email = $1 OR display_name = $2
+  `;
+
+  const checkRes = await pool.query(checkQuery, [email, display_name]);
+
+  if (checkRes.rows.length > 0) {
+    const conflicts = checkRes.rows.map((r) => r.conflict_field);
+    const messages = [];
+    if (conflicts.includes("email")) messages.push("Email already registered");
+    if (conflicts.includes("display_name"))
+      messages.push("Display Name already registered");
+
+    throw new AppError(messages.join(", "), 400);
+  }
+
+  // 2️⃣ Use a default hashed password ("padel123")
+  const password = "padel123";
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  // 3️⃣ Insert user (mark as fake)
+  const insertQuery = `
+    INSERT INTO users (
+      email, gender, password, elo_rate, category, display_name,
+      created_at, is_fake
+    )
+    VALUES ($1,$2,$3,$4,$5,$6,NOW(),TRUE)
+    RETURNING id, email, display_name, category, created_at, is_fake
+  `;
+
+  const insertRes = await pool.query(insertQuery, [
+    email,
+    gender,
+    hashedPassword,
+    elo_rate,
+    category,
+    display_name,
+  ]);
+
+  const newUser = insertRes.rows[0];
+
+  // 4️⃣ Emit socket update
+  if (global.io) {
+    global.io.to("users_room").emit("usersUpdated", {
+      action: "create",
+      user: newUser,
+      message: `${newUser.display_name} has been added by admin`,
+    });
+  }
+
+  return {
+    message: "User successfully created by admin",
+    user: newUser,
   };
 };
 
@@ -770,86 +853,134 @@ const loginUser = async ({ identifier, password }) => {
 
 // email verification
 const verifyAndInsertUser = async (token) => {
-  let payload;
-  try {
-    payload = jwt.verify(token, process.env.JWT_SECRET);
-  } catch (err) {
-    throw new AppError("Invalid or expired token", 401);
-  }
+  const client = await pool.connect();
 
-  // find the pending row and ensure token matches and not expired
-  const r = await pool.query(
-    "SELECT * FROM pending_registrations WHERE email = $1 AND email_token = $2",
-    [payload.email, token]
-  );
-  if (!r.rows.length)
-    throw new AppError(
-      "Invalid or expired token or no pending registration",
-      401
+  try {
+    // 1️⃣ Verify JWT
+    let payload;
+    try {
+      payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      throw new AppError("Invalid or expired token", 401);
+    }
+
+    // 2️⃣ Validate pending registration
+    const pendingRes = await client.query(
+      `
+      SELECT * FROM pending_registrations
+      WHERE email = $1 AND email_token = $2
+      `,
+      [payload.email, token]
     );
 
-  const pending = r.rows[0];
-  if (
-    pending.email_token_expires_at &&
-    new Date(pending.email_token_expires_at) < new Date()
-  ) {
-    throw new AppError("Verification token expired", 401);
-  }
+    if (pendingRes.rowCount === 0) {
+      throw new AppError(
+        "Invalid or expired token or no pending registration",
+        401
+      );
+    }
 
-  // check user already exists
-  const existing = await pool.query("SELECT 1 FROM users WHERE email = $1", [
-    payload.email,
-  ]);
-  if (existing.rows.length) throw new AppError("Email already verified", 401);
+    const pending = pendingRes.rows[0];
 
-  // insert into users table (map fields as needed)
-  const result = await pool.query(
-    `INSERT INTO users (
-      first_name, last_name, email, phone_number, country_code, nationality,
-      date_of_birth, gender, address, image_url, password, elo_rate, category, display_name, created_at
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
-     RETURNING id, email, display_name`,
-    [
-      pending.first_name,
-      pending.last_name,
-      pending.email,
-      pending.phone_number,
-      pending.country_code,
-      pending.nationality,
-      pending.date_of_birth,
-      pending.gender,
-      pending.address,
-      pending.image_url,
-      pending.password_hash,
-      pending.elo_rate,
-      pending.category,
-      pending.display_name,
-    ]
-  );
+    // Check if token expired
+    if (
+      pending.email_token_expires_at &&
+      new Date(pending.email_token_expires_at) < new Date()
+    ) {
+      throw new AppError("Verification token expired", 401);
+    }
 
-  const newUser = result.rows[0];
+    // Check if already verified
+    const existingUser = await client.query(
+      "SELECT 1 FROM users WHERE email = $1",
+      [payload.email]
+    );
+    if (existingUser.rowCount > 0) {
+      throw new AppError("Email already verified", 401);
+    }
 
-  // remove pending registration (or mark email_verified = true, expires_at = NOW(), etc.)
-  await pool.query("DELETE FROM pending_registrations WHERE id = $1", [
-    pending.id,
-  ]);
+    // 3️⃣ Begin transaction
+    await client.query("BEGIN");
 
-  // emit websocket event to room verify_<email>
-  if (global.io) {
-    global.io.to(`verify_${newUser.email}`).emit("emailVerified", {
+    // 4️⃣ Insert into users
+    const insertRes = await client.query(
+      `
+      INSERT INTO users (
+        first_name, last_name, email, phone_number, country_code, nationality,
+        date_of_birth, gender, address, image_url, password, elo_rate,
+        category, display_name, created_at
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
+      RETURNING id, email, display_name, category, first_name, last_name, phone_number, created_at
+      `,
+      [
+        pending.first_name,
+        pending.last_name,
+        pending.email,
+        pending.phone_number,
+        pending.country_code,
+        pending.nationality,
+        pending.date_of_birth,
+        pending.gender,
+        pending.address,
+        pending.image_url,
+        pending.password_hash,
+        pending.elo_rate,
+        pending.category,
+        pending.display_name,
+      ]
+    );
+
+    const newUser = insertRes.rows[0];
+
+    // 5️⃣ Remove from pending table
+    await client.query("DELETE FROM pending_registrations WHERE id = $1", [
+      pending.id,
+    ]);
+
+    // 6️⃣ Commit transaction
+    await client.query("COMMIT");
+
+    // 7️⃣ Emit WebSocket events after commit
+    if (global.io) {
+      // Notify the email verification watcher
+      global.io.to(`verify_${newUser.email}`).emit("emailVerified", {
+        email: newUser.email,
+        message: "Email verified successfully",
+      });
+
+      // Notify dashboards / user lists
+      global.io.to("users_room").emit("usersUpdated", {
+        action: "create",
+        user: newUser,
+        message: `${newUser.display_name} has been added.`,
+      });
+    }
+
+    // 8️⃣ Send welcome email
+    await sendWelcomeEmail({
+      display_name: newUser.display_name,
       email: newUser.email,
-      message: "Email verified successfully",
     });
-  }
-  await sendWelcomeEmail({
-    display_name: newUser.display_name,
-    email: newUser.email,
-  });
 
-  return newUser;
+    return newUser;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("❌ Error verifying user:", err.message);
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 const getUsers = async () => {
+  const result =
+    await pool.query(`SELECT id, email, first_name, last_name,  gender, image_url,  created_at, elo_rate, display_name, category, rank
+     FROM users WHERE is_fake = false`);
+  return result.rows;
+};
+
+const getUsersForSuperAdm = async () => {
   const result =
     await pool.query(`SELECT id, email, first_name, last_name, date_of_birth, gender, image_url, phone_number, nationality, address, created_at, updated_at, elo_rate, display_name, category, rank
      FROM users`);
@@ -858,7 +989,7 @@ const getUsers = async () => {
 
 const getUserById = async (userId) => {
   const result = await pool.query(
-    `SELECT id, email, first_name, last_name,category, date_of_birth, gender, image_url, phone_number, nationality, address, created_at, updated_at, elo_rate, user_status, display_name, rank 
+    `SELECT id, email, first_name, last_name, category, date_of_birth, gender, image_url, phone_number, nationality, address, created_at, updated_at, elo_rate, user_status, display_name, rank 
      FROM users
      WHERE id = $1`,
     [userId]
@@ -1274,6 +1405,7 @@ module.exports = {
   loginAdmin,
   updateAdmin,
   updateAdminBySuper,
+  registerUserFromSuperAdm,
   registerUserFromAdm,
   registerUser,
   deleteAdmin,
@@ -1284,6 +1416,7 @@ module.exports = {
   lookupUser,
   deleteUser,
   getUsers,
+  getUsersForSuperAdm,
   forgotPasswordOtp,
   resetPasswordWithOtp,
   startRegistrationSms,

@@ -73,8 +73,7 @@ exports.updateAdminBySuperController = async (req, res, next) => {
 // ----------------------------
 // Register user (initial, pending email verification)
 // ----------------------------
-exports.registerUserFromAdmin = async (req, res, next) => {
-  console.log(req.body);
+exports.registerUserFromSuperAdmin = async (req, res, next) => {
   let {
     first_name,
     last_name,
@@ -86,7 +85,6 @@ exports.registerUserFromAdmin = async (req, res, next) => {
     country_code,
     expected_category,
   } = req.body;
-  console.log(req.body);
 
   // Calculate ELO & category (optional, to prevent frontend tampering)
   let calculatedElo = 900; // default beginner
@@ -140,23 +138,78 @@ exports.registerUserFromAdmin = async (req, res, next) => {
   // }
 
   // Call service to create the user
-  const result = await authService.registerUserFromAdm({
-    first_name,
-    last_name,
-    email,
-    phone_number,
-    gender,
-    password,
-    category,
-    elo_rate,
-    display_name,
-    country_code,
-  });
+  try {
+    const result = await authService.registerUserFromSuperAdm({
+      first_name,
+      last_name,
+      email,
+      phone_number,
+      gender,
+      password,
+      category,
+      elo_rate,
+      display_name,
+      country_code,
+    });
 
-  res.status(201).json({
-    success: true,
-    message: result.message,
-  });
+    res.status(201).json({
+      success: true,
+      message: result.message,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.registerUserFromAdmin = async (req, res, next) => {
+  let { gender, display_name, expected_category } = req.body;
+
+  // Calculate ELO & category (optional, to prevent frontend tampering)
+  let calculatedElo = 900;
+  let calculatedCategory = "D-";
+
+  switch ((expected_category || "").toLowerCase()) {
+    case "beginner":
+      calculatedElo = 900;
+      calculatedCategory = "D-";
+      break;
+    case "intermediate":
+      calculatedElo = 1050;
+      calculatedCategory = "C-";
+      break;
+    case "advanced":
+      calculatedElo = 1200;
+      calculatedCategory = "B-";
+      break;
+    case "professional":
+      calculatedElo = 1350;
+      calculatedCategory = "A-";
+      break;
+    case "elite":
+      calculatedElo = 1500;
+      calculatedCategory = "A+";
+      break;
+  }
+
+  const category = calculatedCategory;
+  const elo_rate = calculatedElo;
+
+  // Call service to create the user
+  try {
+    const result = await authService.registerUserFromAdm({
+      gender,
+      category,
+      elo_rate,
+      display_name,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: result.message,
+    });
+  } catch (err) {
+    next(err);
+  }
 };
 
 exports.register = async (req, res, next) => {
@@ -357,6 +410,17 @@ exports.getUsers = async (req, res, next) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: "Failed fetching users." });
+  }
+};
+
+exports.getUsersForSuperAdm = async (req, res, next) => {
+  try {
+    console.log("hello");
+    const result = await authService.getUsersForSuperAdm();
+    console.log(result);
+    res.json(result);
+  } catch (err) {
+    next(err);
   }
 };
 

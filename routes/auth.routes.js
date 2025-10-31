@@ -36,9 +36,15 @@ router.delete(
 // ------------------ User Routes ------------------
 // Registration with optional profile image
 router.post(
-  "/admin/register-user",
+  "/s-admin/register-user",
   authenticateToken,
   authorizeRoles("superadmin"),
+  authController.registerUserFromSuperAdmin
+);
+router.post(
+  "/admin/register-user",
+  authenticateToken,
+  authorizeRoles("company_admin"),
   authController.registerUserFromAdmin
 );
 
@@ -47,6 +53,12 @@ router.post("/login", authController.login);
 
 // User management
 router.get("/users", authController.getUsers);
+router.get(
+  "/s-admin/users",
+  authenticateToken,
+  authorizeRoles("superadmin"),
+  authController.getUsersForSuperAdm
+);
 router.get("/user/:id", authController.getUserById);
 router.get("/user/:id/view", authController.getUserViewById);
 router.put(

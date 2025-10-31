@@ -129,6 +129,17 @@ io.on("connection", (socket) => {
     console.log(`📌 Client ${socket.id} is watching email ${email}`);
   });
 
+  // --- NEW USER-RELATED SOCKET EVENTS ---
+  socket.on("joinUsersRoom", () => {
+    socket.join(`users_room`);
+    console.log(`👥 ${socket.id} joined users_room`);
+  });
+
+  socket.on("leaveUsersRoom", () => {
+    socket.leave("users_room");
+    console.log(`👥 ${socket.id} left users_room`);
+  });
+
   socket.on("disconnect", () => {
     console.log("❌ Client disconnected:", socket.id);
   });
