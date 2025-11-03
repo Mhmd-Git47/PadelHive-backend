@@ -85,7 +85,15 @@ const createPaymentParticipant = async (participantData, client) => {
 const getPaymentsByTournamentId = async (tournamentId) => {
   const res = await pool.query(
     `
-        SELECT * FROM payments WHERE tournament_id = $1 ORDER BY created_at DESC`,
+    SELECT 
+      p.*, 
+      g.name AS group_name
+    FROM payments p
+    LEFT JOIN group_participants gp ON gp.participant_id = p.participant_id
+    LEFT JOIN groups g ON g.id = gp.group_id
+    WHERE p.tournament_id = $1
+    ORDER BY p.created_at DESC
+    `,
     [tournamentId]
   );
 
