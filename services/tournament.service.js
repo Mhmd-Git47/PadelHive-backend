@@ -1,13 +1,12 @@
 const pool = require("../db");
-const {
-  createInitialStagesForTournament,
-  deleteStagesByTournamentId,
-} = require("./stage.service");
+const { AppError } = require(`../utils/errors`);
+const { createInitialStagesForTournament } = require("./stage.service");
 
 const tournamentHelper = require("../helpers/tournament.helper");
+const activityLogService = require("./activityLog.service");
 
 // tournament
-const createTournament = async (tournamentData) => {
+const createTournament = async (tournamentData, userId, userRole) => {
   const {
     name,
     description,
@@ -47,7 +46,7 @@ const createTournament = async (tournamentData) => {
     competition_type !== "competitive" &&
     competition_type === null
   ) {
-    throw new Error(`Invalid competition type.`);
+    throw new AppError(`Invalid competition type.`, 400);
   }
 
   try {
@@ -139,12 +138,45 @@ const createTournament = async (tournamentData) => {
       tournament.tournament_format
     );
 
+    const user = await activityLogService.getActorDetails(userId, userRole);
+
+    await activityLogService.createActivityLog(
+      {
+        scope: "both",
+        company_id,
+        actor_id: userId,
+        actor_name: user.name,
+        actor_role: "superadmin",
+        action_type: "CREATE_TOURNAMENT",
+        entity_type: "tournament",
+        entity_id: tournament.id,
+        description: `Created new tournament "${name}"`,
+        status: "Success",
+      },
+      client
+    );
+
     await client.query("COMMIT");
     return tournament;
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("❌ Error creating tournament:", err);
-    throw err;
+    try {
+      await activityLogService.createActivityLog({
+        scope: "both",
+        company_id,
+        actor_id: userId,
+        actor_name: "System",
+        actor_role: userRole,
+        action_type: "CREATE_TOURNAMENT_FAILED",
+        entity_type: "tournament",
+        description: `Failed to create tournament "${name}": ${err.message}`,
+        status: "Failed",
+      });
+    } catch (logErr) {
+      console.error("⚠️ Could not log failed activity:", logErr);
+    }
+    throw new AppError(`An error occured`, 500);
   } finally {
     client.release();
   }
@@ -152,7 +184,7 @@ const createTournament = async (tournamentData) => {
 
 const updateTournament = async (id, updateData) => {
   if (Object.keys(updateData).length === 0) {
-    throw new Error(`No fields provided to update`);
+    throw new AppError(`No fields provided to update`, 400);
   }
 
   const fields = [];
@@ -213,16 +245,44 @@ const getTournamentById = async (id) => {
   return tournament.rows[0];
 };
 
-const deleteTournament = async (id) => {
+const deleteTournament = async (id, userId, userRole) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+
+    const tournamentRes = await client.query(
+      `SELECT id,name, company_id FROM tournaments WHERE id = $1`,
+      [id]
+    );
+
+    if (tournamentRes.rowCount === 0) {
+      throw new AppError(`Tournament is not found.`, 400);
+    }
+
+    const tournament = tournamentRes.rows[0];
 
     // await deleteStagesByTournamentId(id, client);
 
     const result = await client.query("DELETE FROM tournaments WHERE id = $1", [
       id,
     ]);
+
+    const actor = await activityLogService.getActorDetails(userId, userRole);
+
+    await activityLogService.createActivityLog(
+      {
+        scope: "both",
+        company_id: tournament.company_id,
+        actor_id: userId,
+        actor_role: userRole,
+        actor_name: actor.name,
+        action_type: "DELETE_TOURNAMENT",
+        entity_type: "tournament",
+        entity_id: tournament.id,
+        description: `${tournament.name} tournament has been deleted.`,
+      },
+      client
+    );
 
     await client.query("COMMIT");
 
@@ -233,7 +293,7 @@ const deleteTournament = async (id) => {
     return { success: true };
   } catch (err) {
     await client.query("ROLLBACK");
-    throw err;
+    throw new AppError(`An error occured`, 500);
   } finally {
     client.release();
   }

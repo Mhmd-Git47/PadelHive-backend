@@ -86,6 +86,8 @@ exports.registerUserFromSuperAdmin = async (req, res, next) => {
     expected_category,
   } = req.body;
 
+  let userId = req.user?.id;
+
   // Calculate ELO & category (optional, to prevent frontend tampering)
   let calculatedElo = 900; // default beginner
   let calculatedCategory = "D-";
@@ -116,41 +118,23 @@ exports.registerUserFromSuperAdmin = async (req, res, next) => {
   const category = calculatedCategory;
   const elo_rate = calculatedElo;
 
-  // // Handle profile image upload (optional)
-  // let image_url = null;
-  // if (req.file) {
-  //   const filename = `user-${Date.now()}.webp`;
-  //   const outputPath = path.join(
-  //     __dirname,
-  //     "..",
-  //     "assets",
-  //     "images",
-  //     "users",
-  //     filename
-  //   );
-
-  //   await sharp(req.file.buffer)
-  //     .resize({ width: 512, height: 512, fit: "cover" })
-  //     .webp({ quality: 80 })
-  //     .toFile(outputPath);
-
-  //   image_url = filename;
-  // }
-
   // Call service to create the user
   try {
-    const result = await authService.registerUserFromSuperAdm({
-      first_name,
-      last_name,
-      email,
-      phone_number,
-      gender,
-      password,
-      category,
-      elo_rate,
-      display_name,
-      country_code,
-    });
+    const result = await authService.registerUserFromSuperAdm(
+      {
+        first_name,
+        last_name,
+        email,
+        phone_number,
+        gender,
+        password,
+        category,
+        elo_rate,
+        display_name,
+        country_code,
+      },
+      userId
+    );
 
     res.status(201).json({
       success: true,
@@ -163,6 +147,8 @@ exports.registerUserFromSuperAdmin = async (req, res, next) => {
 
 exports.registerUserFromAdmin = async (req, res, next) => {
   let { gender, display_name, expected_category } = req.body;
+  let userId = req.user?.id;
+  let userRole = req.user?.role;
 
   // Calculate ELO & category (optional, to prevent frontend tampering)
   let calculatedElo = 900;
@@ -196,12 +182,16 @@ exports.registerUserFromAdmin = async (req, res, next) => {
 
   // Call service to create the user
   try {
-    const result = await authService.registerUserFromAdm({
-      gender,
-      category,
-      elo_rate,
-      display_name,
-    });
+    const result = await authService.registerUserFromAdm(
+      {
+        gender,
+        category,
+        elo_rate,
+        display_name,
+      },
+      userId,
+      userRole
+    );
 
     res.status(201).json({
       success: true,
@@ -523,12 +513,14 @@ exports.lookupUser = async (req, res, next) => {
 
 exports.deleteUser = async (req, res, next) => {
   const { id } = req.params;
+  const userId = req.user?.id;
+  const userRole = req.user?.role;
   if (!id) {
     return res.status(400).json({ error: "Missing User Id" });
   }
 
   try {
-    const result = await authService.deleteUser(id);
+    const result = await authService.deleteUser(id, userId, userRole);
     res.json(result);
   } catch (err) {
     next(err);

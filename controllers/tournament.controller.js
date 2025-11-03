@@ -31,8 +31,15 @@ exports.createTournament = async (req, res) => {
       ...req.body,
       poster_url: posterFilename,
     };
+    // get authenticated user id (null if not provided)
+    const userId = req.user?.id ?? null;
+    const userRole = req.user?.role ?? null;
 
-    const tournament = await tournamentService.createTournament(tournamentData);
+    const tournament = await tournamentService.createTournament(
+      tournamentData,
+      userId,
+      userRole
+    );
     res.status(201).json(tournament);
   } catch (err) {
     console.error(`Error creating tournament: ${err}`);
@@ -148,7 +155,13 @@ exports.getTournamentById = async (req, res) => {
 exports.deleteTournament = async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await tournamentService.deleteTournament(id);
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
+    const result = await tournamentService.deleteTournament(
+      id,
+      userId,
+      userRole
+    );
 
     if (result.notFound) {
       return res.status(404).json({ error: "Tournament not found" });

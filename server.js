@@ -27,6 +27,7 @@ const subscriptionRoutes = require("./routes/subscription.routes");
 const smsRoutes = require("./routes/sms.routes");
 const locationRoutes = require("./routes/location.routes");
 const dashboardRoutes = require("./routes/dashboard.routes");
+const logRoutes = require("./routes/activityLog.routes");
 const errorHandler = require("./middleware/errorHandler.middleware");
 
 // cron
@@ -59,6 +60,7 @@ app.use("/api/contact", contactRoutes);
 app.use("/api/subscribe", subscriptionRoutes);
 app.use("/api/locations", locationRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/logs", logRoutes);
 
 // sms
 app.use("/api/sms", smsRoutes);

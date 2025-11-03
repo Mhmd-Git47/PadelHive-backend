@@ -12,6 +12,7 @@ const {
   sendPasswordResetSuccessEmail,
   sendPasswordResetOtpEmail,
 } = require("../helpers/email.helper");
+const { createActivityLog, getActorDetails } = require("./activityLog.service");
 
 const registerAdmin = async ({
   username,
@@ -403,162 +404,246 @@ const verifyRegistrationSms = async (pending_id, otp) => {
   return result.rows[0];
 };
 
-const registerUserFromSuperAdm = async ({
-  first_name,
-  last_name,
-  email,
-  phone_number,
-  gender,
-  password,
-  display_name,
-  country_code,
-  elo_rate,
-  category,
-}) => {
-  // 1️⃣ Check for duplicates
-  const checkQuery = `
-    SELECT 
-      CASE 
-        WHEN email = $1 THEN 'email'
-        WHEN display_name = $2 THEN 'display_name'
-        WHEN phone_number = $3 THEN 'phone_number'
-      END AS conflict_field
-    FROM users
-    WHERE email = $1 OR display_name = $2 OR phone_number = $3
-  `;
-
-  const checkRes = await pool.query(checkQuery, [
-    email,
-    display_name,
-    phone_number,
-  ]);
-
-  if (checkRes.rows.length > 0) {
-    const conflicts = checkRes.rows.map((r) => r.conflict_field);
-    const messages = [];
-    if (conflicts.includes("email")) messages.push("Email already registered");
-    if (conflicts.includes("display_name"))
-      messages.push("Display Name already registered");
-    if (conflicts.includes("phone_number"))
-      messages.push("Phone Number already registered");
-
-    throw new AppError(messages.join(", "), 400);
-  }
-
-  // 2️⃣ Hash password
-  const hashedPassword = await bcrypt.hash(password, 10);
-
-  // 3️⃣ Insert user into DB
-  const insertQuery = `
-    INSERT INTO users (
-      first_name, last_name, email, country_code, phone_number,
-      gender, password, elo_rate, category, display_name, created_at
-    )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
-    RETURNING id, email, display_name, category, first_name, last_name, phone_number, created_at
-  `;
-
-  const insertRes = await pool.query(insertQuery, [
+const registerUserFromSuperAdm = async (
+  {
     first_name,
     last_name,
     email,
-    country_code,
     phone_number,
     gender,
-    hashedPassword,
+    password,
+    display_name,
+    country_code,
     elo_rate,
     category,
-    display_name,
-  ]);
+  },
+  userId
+) => {
+  const client = await pool.connect();
 
-  const newUser = insertRes.rows[0];
+  try {
+    // 1️⃣ Check for duplicates
+    const checkQuery = `
+      SELECT 
+        CASE 
+          WHEN email = $1 THEN 'email'
+          WHEN display_name = $2 THEN 'display_name'
+          WHEN phone_number = $3 THEN 'phone_number'
+        END AS conflict_field
+      FROM users
+      WHERE email = $1 OR display_name = $2 OR phone_number = $3
+    `;
 
-  if (global.io) {
-    global.io.to("users_room").emit("usersUpdated", {
-      action: "create",
-      user: newUser,
-      message: `${newUser.display_name} has been added`,
+    const checkRes = await client.query(checkQuery, [
+      email,
+      display_name,
+      phone_number,
+    ]);
+
+    if (checkRes.rows.length > 0) {
+      const conflicts = checkRes.rows.map((r) => r.conflict_field);
+      const messages = [];
+      if (conflicts.includes("email"))
+        messages.push("Email already registered");
+      if (conflicts.includes("display_name"))
+        messages.push("Display Name already registered");
+      if (conflicts.includes("phone_number"))
+        messages.push("Phone Number already registered");
+
+      throw new AppError(messages.join(", "), 400);
+    }
+
+    // 2️⃣ Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // 3️⃣ Insert new user
+    const insertQuery = `
+      INSERT INTO users (
+        first_name, last_name, email, country_code, phone_number,
+        gender, password, elo_rate, category, display_name, created_at
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+      RETURNING id, email, display_name, category, first_name, last_name, phone_number, created_at
+    `;
+
+    const insertRes = await client.query(insertQuery, [
+      first_name,
+      last_name,
+      email,
+      country_code,
+      phone_number,
+      gender,
+      hashedPassword,
+      elo_rate,
+      category,
+      display_name,
+    ]);
+
+    const newUser = insertRes.rows[0];
+
+    // 5️⃣ Create Activity Log
+    await createActivityLog({
+      scope: "superadmin",
+      company_id: null,
+      actor_id: userId?.toString(),
+      actor_name: "Superadmin",
+      actor_role: "superadmin",
+      action_type: "ADD_USER",
+      entity_type: "user",
+      entity_id: newUser.id?.toString(),
+      description: `A new user "${newUser.display_name}" (${email}) was added by superadmin.`,
+      status: "Success",
     });
-  }
 
-  return {
-    message: "User successfully created",
-    user: insertRes.rows[0],
-  };
+    // 6️⃣ Emit WebSocket Event
+    if (global.io) {
+      global.io.to("users_room").emit("usersUpdated", {
+        action: "create",
+        user: newUser,
+        message: `${newUser.display_name} has been added by superadmin`,
+      });
+    }
+
+    return {
+      message: "User successfully created",
+      user: newUser,
+    };
+  } catch (err) {
+    console.error("❌ Error creating user by superadmin:", err.message);
+
+    // 🧩 Log failure as well
+    await createActivityLog({
+      scope: "superadmin",
+      company_id: null,
+      actor_id: userId?.toString(),
+      actor_name: "Superadmin",
+      actor_role: "superadmin",
+      action_type: "ADD_USER_FAILED",
+      entity_type: "user",
+      entity_id: null,
+      description: `Failed to create user "${display_name}" (${email}): ${err.message}`,
+      status: "Failed",
+    });
+
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
-const registerUserFromAdm = async ({
-  gender,
-  display_name,
-  elo_rate,
-  category,
-}) => {
-  // 🧩 Generate a fake system email
-  const email = `${display_name
-    .toLowerCase()
-    .replace(/\s+/g, "")}@padelhive.fake`;
+const registerUserFromAdm = async (
+  { gender, display_name, elo_rate, category },
+  userId,
+  userRole
+) => {
+  const client = await pool.connect();
 
-  // 1️⃣ Check for duplicates
-  const checkQuery = `
-    SELECT 
-      CASE 
-        WHEN email = $1 THEN 'email'
-        WHEN display_name = $2 THEN 'display_name'
-      END AS conflict_field
-    FROM users
-    WHERE email = $1 OR display_name = $2
-  `;
+  try {
+    // 🧩 Generate a fake system email
+    const email = `${display_name
+      .toLowerCase()
+      .replace(/\s+/g, "")}@padelhive.fake`;
 
-  const checkRes = await pool.query(checkQuery, [email, display_name]);
+    // 1️⃣ Check for duplicates
+    const checkQuery = `
+      SELECT 
+        CASE 
+          WHEN email = $1 THEN 'email'
+          WHEN display_name = $2 THEN 'display_name'
+        END AS conflict_field
+      FROM users
+      WHERE email = $1 OR display_name = $2
+    `;
 
-  if (checkRes.rows.length > 0) {
-    const conflicts = checkRes.rows.map((r) => r.conflict_field);
-    const messages = [];
-    if (conflicts.includes("email")) messages.push("Email already registered");
-    if (conflicts.includes("display_name"))
-      messages.push("Display Name already registered");
+    const checkRes = await client.query(checkQuery, [email, display_name]);
 
-    throw new AppError(messages.join(", "), 400);
-  }
+    if (checkRes.rows.length > 0) {
+      const conflicts = checkRes.rows.map((r) => r.conflict_field);
+      const messages = [];
+      if (conflicts.includes("email"))
+        messages.push("Email already registered");
+      if (conflicts.includes("display_name"))
+        messages.push("Display Name already registered");
 
-  // 2️⃣ Use a default hashed password ("padel123")
-  const password = "padel123";
-  const hashedPassword = await bcrypt.hash(password, 10);
+      throw new AppError(messages.join(", "), 400);
+    }
 
-  // 3️⃣ Insert user (mark as fake)
-  const insertQuery = `
-    INSERT INTO users (
-      email, gender, password, elo_rate, category, display_name,
-      created_at, is_fake
-    )
-    VALUES ($1,$2,$3,$4,$5,$6,NOW(),TRUE)
-    RETURNING id, email, display_name, category, created_at, is_fake
-  `;
+    // 2️⃣ Use a default hashed password ("padel123")
+    const password = "padel123";
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-  const insertRes = await pool.query(insertQuery, [
-    email,
-    gender,
-    hashedPassword,
-    elo_rate,
-    category,
-    display_name,
-  ]);
+    // 3️⃣ Insert user (mark as fake)
+    const insertQuery = `
+      INSERT INTO users (
+        email, gender, password, elo_rate, category, display_name,
+        created_at, is_fake
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,NOW(),TRUE)
+      RETURNING id, email, display_name, category, created_at, is_fake
+    `;
 
-  const newUser = insertRes.rows[0];
+    const insertRes = await client.query(insertQuery, [
+      email,
+      gender,
+      hashedPassword,
+      elo_rate,
+      category,
+      display_name,
+    ]);
 
-  // 4️⃣ Emit socket update
-  if (global.io) {
-    global.io.to("users_room").emit("usersUpdated", {
-      action: "create",
-      user: newUser,
-      message: `${newUser.display_name} has been added by admin`,
+    const newUser = insertRes.rows[0];
+
+    // 4️⃣ Fetch the actor’s details (who created this user)
+    const currentUser = await getActorDetails(userId, userRole);
+
+    // 5️⃣ Log activity
+    await createActivityLog({
+      scope: "superadmin",
+      company_id: null,
+      actor_id: userId.toString(),
+      actor_name:
+        currentUser?.name || currentUser?.club_name || "Unknown Admin",
+      actor_role: userRole,
+      entity_id: newUser.id.toString(),
+      action_type: "ADD_DUMMY_USER",
+      entity_type: "user",
+      description: `A new dummy user "${newUser.display_name}" has been added.`,
+      status: "Success",
     });
-  }
 
-  return {
-    message: "User successfully created by admin",
-    user: newUser,
-  };
+    // 6️⃣ Emit socket update
+    if (global.io) {
+      global.io.to("users_room").emit("usersUpdated", {
+        action: "create",
+        user: newUser,
+        message: `${newUser.display_name} has been added by ${userRole}`,
+      });
+    }
+
+    return {
+      message: "User successfully created by admin",
+      user: newUser,
+    };
+  } catch (err) {
+    console.error("❌ Error registering user from admin:", err.message);
+
+    // Optional: log failure
+    await createActivityLog({
+      scope: "superadmin",
+      company_id: null,
+      actor_id: userId?.toString() ?? null,
+      actor_name: "Unknown",
+      actor_role: userRole,
+      action_type: "ADD_DUMMY_USER_FAILED",
+      entity_type: "user",
+      description: `Failed to create dummy user "${display_name}": ${err.message}`,
+      status: "Failed",
+    });
+
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 const registerUser = async ({
@@ -577,105 +662,138 @@ const registerUser = async ({
   display_name,
   country_code,
 }) => {
-  const passwordValidation = validatePassword(password);
-  if (!passwordValidation.isValid) {
-    throw new AppError(passwordValidation.reasons.join(", "), 400);
+  const client = await pool.connect();
+
+  try {
+    // 1️⃣ Validate password
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.isValid) {
+      throw new AppError(passwordValidation.reasons.join(", "), 400);
+    }
+
+    // 2️⃣ Check for existing email / username / phone
+    const errors = [];
+
+    const checkQueries = [
+      client.query("SELECT 1 FROM users WHERE email = $1", [email]),
+      client.query("SELECT 1 FROM users WHERE display_name = $1", [
+        display_name,
+      ]),
+      client.query("SELECT 1 FROM users WHERE phone_number = $1", [
+        phone_number,
+      ]),
+    ];
+
+    const [existingEmail, existingDisplayName, existingPhone] =
+      await Promise.all(checkQueries);
+
+    if (existingEmail.rowCount > 0) errors.push("Email already registered");
+    if (existingDisplayName.rowCount > 0)
+      errors.push("Display Name already registered");
+    if (existingPhone.rowCount > 0)
+      errors.push("Phone Number already registered");
+
+    if (errors.length > 0) {
+      throw new AppError(errors.join(", "), 400);
+    }
+
+    // 3️⃣ Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // 4️⃣ Generate JWT verification token
+    const token = jwt.sign(
+      {
+        first_name,
+        last_name,
+        email,
+        display_name,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    const token_expires_at = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    // 5️⃣ Insert pending registration
+    const insert = await client.query(
+      `
+      INSERT INTO pending_registrations (
+        first_name, last_name, email, country_code, phone_number,
+        nationality, date_of_birth, gender, address, image_url,
+        password_hash, elo_rate, category, display_name,
+        created_at, expires_at,
+        email_token, email_token_expires_at, email_sent_count
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+        $11,$12,$13,$14,NOW(),
+        $15,$16,$17,1
+      )
+      RETURNING id
+      `,
+      [
+        first_name,
+        last_name,
+        email,
+        country_code,
+        phone_number,
+        nationality,
+        date_of_birth,
+        gender,
+        address,
+        image_url,
+        hashedPassword,
+        elo_rate,
+        category,
+        display_name,
+        new Date(Date.now() + 24 * 60 * 60 * 1000), // expires in 24h
+        token,
+        token_expires_at,
+      ]
+    );
+
+    const pending_id = insert.rows[0].id;
+
+    // 6️⃣ Send verification email
+    await sendVerificationEmail(email, token, display_name);
+
+    // 7️⃣ Log activity
+    await createActivityLog({
+      scope: "superadmin",
+      company_id: null,
+      actor_id: pending_id.toString(), // ensure consistent type (UUID or bigint)
+      actor_name: display_name,
+      actor_role: "user",
+      action_type: "SENT_REGISTRATION_EMAIL",
+      entity_type: "user",
+      entity_id: pending_id.toString(),
+      description: `Verification email sent to ${email}. Awaiting verification.`,
+      status: "Success",
+    });
+
+    return {
+      message: "Verification email sent. Please verify your email.",
+      pending_id,
+    };
+  } catch (err) {
+    console.error("❌ Error registering user:", err.message);
+
+    // ✅ Log failure separately (optional)
+    await createActivityLog({
+      scope: "superadmin",
+      company_id: null,
+      actor_id: null,
+      actor_name: display_name || email,
+      actor_role: "user",
+      action_type: "SENT_REGISTRATION_EMAIL_FAILED",
+      entity_type: "user",
+      description: `Failed to send verification email to ${email}: ${err.message}`,
+      status: "Failed",
+    });
+
+    throw err;
+  } finally {
+    client.release();
   }
-
-  // 1. Check if email, display_name, phone already exist
-  const errors = [];
-
-  const existingEmail = await pool.query(
-    "SELECT * FROM users WHERE email = $1",
-    [email]
-  );
-  if (existingEmail.rows.length > 0) errors.push("Email already registered");
-
-  const existingDisplayName = await pool.query(
-    "SELECT * FROM users WHERE display_name = $1",
-    [display_name]
-  );
-  if (existingDisplayName.rows.length > 0)
-    errors.push("Display Name already registered");
-
-  const existingPhoneNumber = await pool.query(
-    "SELECT * FROM users WHERE phone_number = $1",
-    [phone_number]
-  );
-  if (existingPhoneNumber.rows.length > 0)
-    errors.push("Phone Number already registered");
-
-  if (errors.length > 0) {
-    throw new AppError(errors.join(", "), 400);
-  }
-  // 2. Hash password
-  const hashedPassword = await bcrypt.hash(password, 10);
-
-  // 3. Generate verification token
-  const token = jwt.sign(
-    {
-      first_name,
-      last_name,
-      email,
-      phone_number,
-      nationality,
-      date_of_birth,
-      gender,
-      address,
-      image_url,
-      category,
-      elo_rate,
-      display_name,
-    },
-    process.env.JWT_SECRET,
-    { expiresIn: "1h" }
-  );
-
-  // Define token expiration for DB
-  const token_expires_at = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-
-  // 4. Insert into pending_registrations
-  const insert = await pool.query(
-    `INSERT INTO pending_registrations
-      (first_name, last_name, email, country_code, phone_number,
-       nationality, date_of_birth, gender, address, image_url,
-       password_hash, elo_rate, category, display_name,
-       created_at, expires_at,
-       email_token, email_token_expires_at, email_sent_count)
-     VALUES
-      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW(),$15,$16,$17,1)
-     RETURNING id`,
-    [
-      first_name,
-      last_name,
-      email,
-      country_code,
-      phone_number,
-      nationality,
-      date_of_birth,
-      gender,
-      address,
-      image_url,
-      hashedPassword,
-      elo_rate,
-      category,
-      display_name,
-      new Date(Date.now() + 24 * 60 * 60 * 1000), // pending expires in 24h
-      token,
-      token_expires_at,
-    ]
-  );
-
-  const pending_id = insert.rows[0].id;
-
-  // 5. Send verification email
-  await sendVerificationEmail(email, token, display_name);
-
-  // 6. Return pending info
-  return {
-    message: "Verification email sent. Please verify your email.",
-    pending_id,
-  };
 };
 
 //validate password on registration
@@ -854,6 +972,7 @@ const loginUser = async ({ identifier, password }) => {
 // email verification
 const verifyAndInsertUser = async (token) => {
   const client = await pool.connect();
+  let newUser = null;
 
   try {
     // 1️⃣ Verify JWT
@@ -938,6 +1057,18 @@ const verifyAndInsertUser = async (token) => {
       pending.id,
     ]);
 
+    await createActivityLog({
+      scope: "superadmin",
+      company_id: null,
+      actor_id: newUser.id,
+      actor_name: newUser.display_name,
+      actor_role: "user",
+      action_type: "ADD_USER",
+      entity_type: "user",
+      description: `New user has been created: ${newUser.display_name}`,
+      status: "Success",
+    });
+
     // 6️⃣ Commit transaction
     await client.query("COMMIT");
 
@@ -967,6 +1098,19 @@ const verifyAndInsertUser = async (token) => {
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("❌ Error verifying user:", err.message);
+    await createActivityLog({
+      scope: "superadmin",
+      company_id: null,
+      actor_id: newUser?.id ?? null,
+      actor_name: newUser?.display_name ?? "System",
+      actor_role: "user",
+      action_type: "ADD_USER_FAILED",
+      entity_type: "user",
+      description: `Failed creating new user ${
+        newUser?.display_name ?? "Unknown"
+      }: ${err.message}`,
+      status: "Failed",
+    });
     throw err;
   } finally {
     client.release();
@@ -1135,9 +1279,63 @@ const lookupUser = async (identifier) => {
   return result.rows[0];
 };
 
-const deleteUser = async (userId) => {
-  const result = await pool.query(`DELETE FROM users WHERE id = $1`, [userId]);
-  return result.rowCount > 0;
+const deleteUser = async (targetUserId, actorId, actorRole) => {
+  const client = await pool.connect();
+
+  try {
+    // 1️⃣ Fetch target user before deletion (for logging info)
+    const userRes = await client.query(
+      `SELECT id, display_name, email FROM users WHERE id = $1`,
+      [targetUserId]
+    );
+
+    if (userRes.rowCount === 0) {
+      throw new AppError("User not found", 404);
+    }
+
+    const targetUser = userRes.rows[0];
+
+    // 2️⃣ Perform deletion
+    const result = await client.query(`DELETE FROM users WHERE id = $1`, [
+      targetUserId,
+    ]);
+    const deleted = result.rowCount > 0;
+
+    // 4️⃣ Log deletion success
+    await createActivityLog({
+      scope: "superadmin",
+      actor_id: actorId?.toString(),
+      actor_name: "Unknown Admin, can be the user",
+      actor_role: actorRole,
+      action_type: "DELETE_USER",
+      entity_type: "user",
+      entity_id: targetUserId?.toString(),
+      description: `User "${targetUser.display_name}" (${targetUser.email}) was deleted.`,
+      status: deleted ? "Success" : "Failed",
+    });
+
+    return deleted;
+  } catch (err) {
+    console.error("❌ Error deleting user:", err.message);
+
+    // 5️⃣ Log deletion failure
+    await createActivityLog({
+      scope: actorRole === "superadmin" ? "superadmin" : "company",
+      company_id: null,
+      actor_id: actorId?.toString(),
+      actor_name: "System",
+      actor_role: actorRole,
+      action_type: "DELETE_USER_FAILED",
+      entity_type: "user",
+      entity_id: targetUserId?.toString(),
+      description: `Failed to delete user (ID: ${targetUserId}): ${err.message}`,
+      status: "Failed",
+    });
+
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 const forgotPasswordOtp = async (email) => {

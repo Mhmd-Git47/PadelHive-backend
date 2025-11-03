@@ -44,7 +44,7 @@ router.post(
 router.post(
   "/admin/register-user",
   authenticateToken,
-  authorizeRoles("company_admin"),
+  authorizeRoles("company_admin", "location_admin"),
   authController.registerUserFromAdmin
 );
 

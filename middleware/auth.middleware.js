@@ -98,7 +98,7 @@ const authorizeCompanyOrLocationAdmin =
 //     next();
 //   } catch (err) {
 //     console.error("Ownership check failed:", err);
-//     res.status(500).json({ error: "Server error" });
+//     res.status(500).json({ error: "Server error" });`
 //   }
 // }
 
@@ -128,7 +128,7 @@ const checkTournamentOwnership = async (req, res, next) => {
     ) {
       return next();
     }
-    console.log(user);
+    // console.log(user);
 
     // Location admin: must match location_id
     if (
