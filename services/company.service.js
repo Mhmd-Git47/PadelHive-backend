@@ -1,4 +1,5 @@
 const pool = require("../db");
+const { createActivityLog } = require("./activityLog.service");
 const { updateAdmin } = require("./auth.service");
 
 const getCompanyById = async (id) => {
@@ -54,10 +55,38 @@ const createCompany = async (adminId, companyData) => {
       client
     );
 
+    await createActivityLog(
+      {
+        scope: "superadmin",
+        company_id: null,
+        actor_id: null,
+        actor_name: "Superadmin",
+        actor_role: "superadmin",
+        action_type: "ADD_COMPANY",
+        entity_id: result.rows[0].id,
+        entity_type: "company",
+        description: `A new company "${companyData.clubName}" was added by superadmin.`,
+        status: "Success",
+      },
+      client
+    );
+
     await client.query("COMMIT");
 
     return result.rows[0];
   } catch (err) {
+    await createActivityLog({
+      scope: "superadmin",
+      company_id: null,
+      actor_id: null,
+      actor_name: "Superadmin",
+      actor_role: "superadmin",
+      action_type: "ADD_COMPANY_FAILED",
+      entity_id: result.rows[0].id,
+      entity_type: "company",
+      description: `Failed adding company "${companyData.clubName}".`,
+      status: "Failed",
+    });
     await client.query("ROLLBACK");
     throw err;
   } finally {
@@ -115,5 +144,5 @@ module.exports = {
   getCompanyById,
   createCompany,
   updateCompany,
-  getPublicCompanyById
+  getPublicCompanyById,
 };

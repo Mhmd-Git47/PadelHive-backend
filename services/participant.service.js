@@ -9,8 +9,9 @@ const {
   sendTournamentLeftEmail,
 } = require("../helpers/email.helper");
 const { AppError } = require("../utils/errors");
+const { createActivityLog, getActorDetails } = require("./activityLog.service");
 
-const createParticipant = async (participantData) => {
+const createParticipant = async (participantData, userId, userRole) => {
   const { tournament_id, name, comment } = participantData;
 
   const client = await pool.connect();
@@ -20,7 +21,7 @@ const createParticipant = async (participantData) => {
 
     // 1️⃣ Fetch tournament to get max_allowed_elo_rate && is registration is open
     const tournamentRes = await client.query(
-      `SELECT id, name, start_at, location_id, open_registration, max_allowed_elo_rate, tournament_type, tournament_format FROM tournaments WHERE id = $1`,
+      `SELECT id, name, start_at, location_id, open_registration, max_allowed_elo_rate, tournament_type, tournament_format, company_id FROM tournaments WHERE id = $1`,
       [tournament_id]
     );
 
@@ -126,6 +127,26 @@ const createParticipant = async (participantData) => {
       [participantCount, tournament_id]
     );
 
+    // 9. work with activity log
+    const actor = await getActorDetails(userId, userRole);
+
+    await createActivityLog(
+      {
+        scope: "company",
+        company_id: tournament.company_id,
+        actor_id: userId,
+        actor_role: userRole,
+        actor_name: actor.name,
+        action_type: "ADD_PARTICIPANT",
+        entity_id: participant.id,
+        entity_type: "participant",
+        description: `A new participant "${participant.name}" has been added to tournament "${tournament.name}".`,
+        status: "Success",
+        tournament_id: tournament_id,
+      },
+      client
+    );
+
     await client.query("COMMIT");
     if (global.io) {
       global.io
@@ -170,6 +191,27 @@ const createParticipant = async (participantData) => {
     return participant;
   } catch (error) {
     await client.query("ROLLBACK");
+
+    try {
+      await createActivityLog({
+        scope: "company",
+        company_id: tournament?.company_id || null,
+        actor_id: userId,
+        actor_role: userRole,
+        actor_name: actor?.name || "Unknown",
+        action_type: "ADD_PARTICIPANT_FAILED",
+        entity_id: null,
+        entity_type: "participant",
+        description: `Failed registering participant "${name}"${
+          tournament ? ` to tournament "${tournament.name}"` : ""
+        }.`,
+        status: "Failed",
+        tournament_id: tournament_id,
+      });
+    } catch (logErr) {
+      console.error("⚠️ Failed to log participant error:", logErr);
+    }
+
     throw error;
   } finally {
     client.release();
@@ -232,14 +274,20 @@ const getParticipantsByTournamentId = async (tournamentId) => {
   return result.rows;
 };
 
-const disqualifyParticipant = async (tournamentId, participantId) => {
+const disqualifyParticipant = async (
+  tournamentId,
+  participantId,
+  userId,
+  userRole
+) => {
   const client = await pool.connect();
-  let updatedParticipant,
-    tournament,
-    updatedCount = 0;
+  let updatedParticipant = null;
+  let tournament = null;
+  let actor = null;
+  let updatedCount = 0;
   let users = [];
 
-  // ✅ Normalize inputs (avoid trailing-space UUID issue)
+  // ✅ Normalize IDs
   const cleanTournamentId = tournamentId?.trim?.() || tournamentId;
   const cleanParticipantId = participantId?.trim?.() || participantId;
 
@@ -253,13 +301,13 @@ const disqualifyParticipant = async (tournamentId, participantId) => {
 
     // 1️⃣ Fetch tournament
     const tournamentRes = await client.query(
-      `SELECT id, name FROM tournaments WHERE id = $1`,
+      `SELECT id, name, company_id FROM tournaments WHERE id = $1`,
       [cleanTournamentId]
     );
     tournament = tournamentRes.rows[0];
-    console.log("🎾 Tournament found:", tournament);
-
     if (!tournament) throw new AppError("Tournament not found", 404);
+
+    console.log("🎾 Tournament found:", tournament.name);
 
     // 2️⃣ Mark participant as disqualified
     const disqualifyRes = await client.query(
@@ -269,12 +317,10 @@ const disqualifyParticipant = async (tournamentId, participantId) => {
       [cleanParticipantId]
     );
     updatedParticipant = disqualifyRes.rows[0];
+    if (!updatedParticipant) throw new AppError("Participant not found", 404);
     console.log("🚫 Participant disqualified:", updatedParticipant?.id);
 
-    if (!updatedParticipant) throw new AppError("Participant not found", 404);
-
-    // 3️⃣ Update history
-    console.log("🕓 Updating user tournament history...");
+    // 3️⃣ Update user_tournaments_history
     await client.query(
       `UPDATE user_tournaments_history
        SET status = 'disqualified', updated_at = NOW()
@@ -282,8 +328,7 @@ const disqualifyParticipant = async (tournamentId, participantId) => {
       [cleanParticipantId]
     );
 
-    // 4️⃣ Get matches for this participant
-    console.log("🔍 Fetching matches for participant...");
+    // 4️⃣ Update matches involving this participant
     const matchesRes = await client.query(
       `SELECT id, player1_id, player2_id, winner_id, scores_csv, state 
        FROM matches 
@@ -292,23 +337,10 @@ const disqualifyParticipant = async (tournamentId, participantId) => {
       [cleanTournamentId, cleanParticipantId]
     );
 
-    console.log("📊 Matches found:", matchesRes.rows.length);
-    if (matchesRes.rows.length === 0) {
-      console.log("⚠️ No matches found for this participant!");
-    }
-
-    // 5️⃣ Force opponent wins
     for (const match of matchesRes.rows) {
-      console.log(`➡️ Processing match: ${match.id}`);
-      console.log(`    Player1: ${match.player1_id}`);
-      console.log(`    Player2: ${match.player2_id}`);
-      console.log(`    Winner before: ${match.winner_id}`);
-      console.log(`    Scores before: ${match.scores_csv}`);
-
       let winnerId = null;
       let scores = "6-0";
 
-      // Make sure to compare UUIDs as strings
       if (String(match.player1_id).trim() === String(cleanParticipantId)) {
         winnerId = match.player2_id;
         scores = "0-6";
@@ -320,31 +352,20 @@ const disqualifyParticipant = async (tournamentId, participantId) => {
       }
 
       if (winnerId) {
-        console.log(
-          `🏆 Updating match ${match.id}: winner -> ${winnerId}, scores -> ${scores}`
-        );
-
         try {
-          // Pass client if matchHelper supports it, otherwise log warning
           await matchHelper.updateMatchHelper(match.id, {
             winner_id: winnerId,
             scores_csv: scores,
             state: "completed",
           });
           updatedCount++;
-          console.log(`✅ Match ${match.id} updated successfully`);
         } catch (updateErr) {
           console.error(`❌ Failed to update match ${match.id}:`, updateErr);
         }
-      } else {
-        console.log(
-          `⚠️ No valid opponent found for match ${match.id} — skipping`
-        );
       }
     }
 
-    // 6️⃣ Fetch linked users
-    console.log("👥 Fetching linked users...");
+    // 5️⃣ Fetch linked users
     const usersRes = await client.query(
       `SELECT DISTINCT id, display_name, email 
        FROM users 
@@ -355,22 +376,63 @@ const disqualifyParticipant = async (tournamentId, participantId) => {
       ]
     );
     users = usersRes.rows;
-    console.log(
-      "📧 Users linked to participant:",
-      users.map((u) => u.email)
-    );
 
+    // 6️⃣ Fetch actor
+    actor = await getActorDetails(userId, userRole);
+
+    // 7️⃣ Commit
     await client.query("COMMIT");
     console.log("✅ Transaction committed successfully");
+
+    // 8️⃣ Log success (outside transaction for reliability)
+    try {
+      await createActivityLog({
+        scope: "company",
+        company_id: tournament.company_id,
+        actor_id: userId,
+        actor_role: userRole,
+        actor_name: actor.name,
+        action_type: "DISQUALIFY_PARTICIPANT",
+        entity_id: updatedParticipant.id,
+        entity_type: "participant",
+        description: `Participant "${updatedParticipant.name}" was disqualified from tournament "${tournament.name}".`,
+        status: "Success",
+        tournament_id: tournament.id,
+      });
+    } catch (logErr) {
+      console.error("⚠️ Failed to record disqualification log:", logErr);
+    }
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("❌ Error disqualifying participant:", err);
+
+    // 🔥 Attempt failure log (safe even if tournament/actor undefined)
+    try {
+      await createActivityLog({
+        scope: "company",
+        company_id: tournament?.company_id || null,
+        actor_id: userId,
+        actor_role: userRole,
+        actor_name: actor?.name || "Unknown",
+        action_type: "DISQUALIFY_PARTICIPANT_FAILED",
+        entity_id: updatedParticipant?.id || cleanParticipantId,
+        entity_type: "participant",
+        description: `Failed to disqualify participant "${
+          updatedParticipant?.name || "unknown"
+        }"${tournament ? ` in tournament "${tournament.name}"` : ""}.`,
+        status: "Failed",
+        tournament_id: tournament?.id || cleanTournamentId,
+      });
+    } catch (logErr) {
+      console.error("⚠️ Failed to log disqualification error:", logErr);
+    }
+
     throw err;
   } finally {
     client.release();
   }
 
-  // 7️⃣ Send emails after commit
+  // 9️⃣ Send emails after commit
   try {
     for (const user of users) {
       console.log(`📨 Sending disqualification email to ${user.email}...`);
@@ -384,9 +446,8 @@ const disqualifyParticipant = async (tournamentId, participantId) => {
     console.error("⚠️ Error sending disqualification emails:", err);
   }
 
-  // 8️⃣ Emit socket update
+  // 🔟 Emit socket update
   if (global.io) {
-    console.log("📡 Emitting participant-updated event...");
     global.io
       .to(`tournament_${updatedParticipant.tournament_id}`)
       .emit("participant-updated", updatedParticipant);
@@ -403,12 +464,12 @@ const disqualifyParticipant = async (tournamentId, participantId) => {
   };
 };
 
-const deleteParticipant = async (participantId) => {
+const deleteParticipant = async (participantId, userId, userRole) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
-    const participant = await pool.query(
+    const participant = await client.query(
       `SELECT * FROM participants WHERE id = $1`,
       [participantId]
     );
@@ -443,6 +504,24 @@ const deleteParticipant = async (participantId) => {
     );
 
     const updatedTournament = tournamentRes.rows[0];
+
+    const actor = await getActorDetails(userId, userRole);
+    await createActivityLog(
+      {
+        scope: "company",
+        company_id: updatedTournament.company_id,
+        actor_id: userId,
+        actor_role: userRole,
+        actor_name: actor.name,
+        action_type: "DELETE_PARTICIPANT",
+        entity_id: participant.rows[0].id,
+        entity_type: "participant",
+        description: `Participant "${participant.rows[0].name}" has been removed from tournament "${updatedTournament.name}".`,
+        status: "Success",
+        tournament_id: updatedTournament.id,
+      },
+      client
+    );
 
     await client.query("COMMIT");
 
@@ -480,6 +559,29 @@ const deleteParticipant = async (participantId) => {
     return res.rowCount > 0;
   } catch (err) {
     await client.query("ROLLBACK");
+    try {
+      await createActivityLog({
+        scope: "company",
+        company_id: updatedTournament?.company_id || null,
+        actor_id: userId,
+        actor_role: userRole,
+        actor_name: actor?.name || "Unknown",
+        action_type: "DELETE_PARTICIPANT_FAILED",
+        entity_id: participant?.rows?.[0]?.id || null,
+        entity_type: "participant",
+        description: `Failed to remove participant "${
+          participant?.rows?.[0]?.name || "unknown"
+        }"${
+          updatedTournament
+            ? ` from tournament "${updatedTournament.name}"`
+            : ""
+        }.`,
+        status: "Failed",
+        tournament_id: updatedTournament?.id || null,
+      });
+    } catch (logErr) {
+      console.error("⚠️ Failed to log participant delete error:", logErr);
+    }
     throw err;
   } finally {
     client.release();

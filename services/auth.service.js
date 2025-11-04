@@ -14,28 +14,57 @@ const {
 } = require("../helpers/email.helper");
 const { createActivityLog, getActorDetails } = require("./activityLog.service");
 
-const registerAdmin = async ({
-  username,
-  password,
-  role,
-  companyId,
-  locationId,
-}) => {
-  const hashed = await bcrypt.hash(password, 10);
+const registerAdmin = async (
+  { username, password, role, companyId, locationId },
+  userId
+) => {
+  try {
+    const hashed = await bcrypt.hash(password, 10);
 
-  // Ensure null is passed correctly (not "null" string)
-  const normalizedCompanyId =
-    companyId && companyId !== "null" ? companyId : null;
+    // Ensure null is passed correctly (not "null" string)
+    const normalizedCompanyId =
+      companyId && companyId !== "null" ? companyId : null;
 
-  const normalizedLocationId =
-    locationId && locationId !== "null" ? locationId : null;
+    const normalizedLocationId =
+      locationId && locationId !== "null" ? locationId : null;
 
-  const result = await pool.query(
-    "INSERT INTO admins (username, password, role, company_id, location_id) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-    [username, hashed, role, normalizedCompanyId, normalizedLocationId]
-  );
+    const result = await pool.query(
+      "INSERT INTO admins (username, password, role, company_id, location_id) VALUES ($1, $2, $3, $4, $5) RETURNING username, role, company_id, location_id",
+      [username, hashed, role, normalizedCompanyId, normalizedLocationId]
+    );
 
-  return result.rows[0];
+    const adm = result.rows[0];
+
+    await createActivityLog({
+      scope: "superadmin",
+      company_id: null,
+      actor_id: null,
+      actor_name: "Superadmin",
+      actor_role: "superadmin",
+      action_type: "ADD_ADMIN",
+      entity_id: adm.id,
+      entity_type: "admin",
+      description: `A new admin "${adm.username}" (role: ${adm.role}) was added by superadmin.`,
+      status: "Success",
+    });
+
+    return result.rows[0];
+  } catch (err) {
+    await createActivityLog({
+      scope: "superadmin",
+      company_id: null,
+      actor_id: null,
+      actor_name: "Superadmin",
+      actor_role: "superadmin",
+      action_type: "ADD_ADMIN_FAILED",
+      entity_id: null,
+      entity_type: "admin",
+      description: `Registration of ${username} admin has failed. `,
+      status: "Failed",
+    });
+    console.error(err.message);
+    throw new AppError(`An error occured. ${err.message}`, 500);
+  }
 };
 
 const loginAdmin = async ({ username, password }) => {
@@ -235,6 +264,22 @@ const deleteAdmin = async (id) => {
     else {
       throw new AppError(`Unknown admin role: ${admin.role}`, 400);
     }
+
+    await createActivityLog(
+      {
+        scope: "superadmin",
+        company_id: null,
+        actor_id: null,
+        actor_name: "Superadmin",
+        actor_role: "superadmin",
+        action_type: "DELETE_ADMIN",
+        entity_type: "admin",
+        entity_id: null,
+        description: `"${admin.username}" admin has been deleted.`,
+        status: "Success",
+      },
+      client
+    );
 
     await client.query("COMMIT");
   } catch (err) {
@@ -760,7 +805,7 @@ const registerUser = async ({
     await createActivityLog({
       scope: "superadmin",
       company_id: null,
-      actor_id: pending_id.toString(), // ensure consistent type (UUID or bigint)
+      actor_id: pending_id.toString(),
       actor_name: display_name,
       actor_role: "user",
       action_type: "SENT_REGISTRATION_EMAIL",

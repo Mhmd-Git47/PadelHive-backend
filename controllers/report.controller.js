@@ -9,10 +9,13 @@ const createReport = async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
+    const userRole = req.user?.role;
+
     const report = await reportService.createReport(
       reporter_id,
       reported_id,
-      reason
+      reason,
+      userRole
     );
     res.status(201).json(report);
   } catch (error) {

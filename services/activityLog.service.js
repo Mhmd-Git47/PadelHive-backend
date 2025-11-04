@@ -14,6 +14,8 @@ const getActorDetails = async (user_id, role) => {
     );
     values = [adminRes.rows[0].location_id];
     query = "SELECT id, name FROM locations WHERE id = $1";
+  } else if (role === "user") {
+    query = "SELECT id, display_name AS name FROM users WHERE id = $1";
   } else {
     throw new AppError("Invalid user role for activity logging.", 400);
   }
@@ -36,13 +38,14 @@ const createActivityLog = async (
     entity_id = null,
     description = null,
     status = "Success",
+    tournament_id = null,
   },
   client = null
 ) => {
   const query = `
     INSERT INTO activity_logs 
-    (scope, company_id, actor_id, actor_name, actor_role, action_type, entity_type, entity_id, description, status)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    (scope, company_id, actor_id, actor_name, actor_role, action_type, entity_type, entity_id, description, status, tournament_id)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, $11)
     RETURNING *;
   `;
 
@@ -57,11 +60,26 @@ const createActivityLog = async (
     entity_id,
     description,
     status,
+    tournament_id,
   ];
 
   try {
     const executor = client || pool;
     const { rows } = await executor.query(query, values);
+    const newLog = rows[0];
+
+    if (global.io) {
+      global.io.to("activity_room").emit("activityUpdated", {
+        action: "create",
+        log: {
+          id: newLog.id,
+          entity_type: newLog.entity_type,
+          description: newLog.description,
+          created_at: newLog.created_at,
+        },
+      });
+    }
+
     return rows[0];
   } catch (err) {
     console.error("❌ Error inserting activity log:", err.message);

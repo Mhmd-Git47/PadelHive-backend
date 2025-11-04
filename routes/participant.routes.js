@@ -1,11 +1,24 @@
 const express = require("express");
 const router = express.Router();
 const participantController = require("../controllers/participants.controller");
-const { authenticateToken } = require("../middleware/auth.middleware");
+const {
+  authenticateToken,
+  authorizeRoles,
+} = require("../middleware/auth.middleware");
 
-router.post("/", participantController.createParticipant);
-router.patch("/:id", participantController.updateParticipant);
-router.patch("/:id/disqualify", participantController.disqualifyParticipant);
+router.post("/", authenticateToken, participantController.createParticipant);
+router.patch(
+  "/:id",
+  authenticateToken,
+  authorizeRoles("company_admin", "location_admin"),
+  participantController.updateParticipant
+);
+router.patch(
+  "/:id/disqualify",
+  authenticateToken,
+  authorizeRoles("company_admin", "location_admin"),
+  participantController.disqualifyParticipant
+);
 router.get("/", participantController.getAllParticipants);
 
 // ✅ MOVE THIS ABOVE `/:id`

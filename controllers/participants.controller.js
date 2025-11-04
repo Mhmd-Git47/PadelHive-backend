@@ -3,7 +3,13 @@ const participantService = require("../services/participant.service");
 exports.createParticipant = async (req, res, next) => {
   try {
     const participantData = req.body;
-    const result = await participantService.createParticipant(participantData);
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
+    const result = await participantService.createParticipant(
+      participantData,
+      userId,
+      userRole
+    );
     res.status(201).json(result);
   } catch (err) {
     console.error("Error creating participant: ", err.message);
@@ -54,9 +60,13 @@ exports.disqualifyParticipant = async (req, res, next) => {
   try {
     const { tournamentId } = req.query;
     const { id } = req.params;
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
     const participant = await participantService.disqualifyParticipant(
       tournamentId,
-      id
+      id,
+      userId,
+      userRole
     );
     res.json(participant);
   } catch (err) {
@@ -90,8 +100,15 @@ exports.deleteParticipant = async (req, res, next) => {
     return res.status(400).json({ error: "Missing Participant Id" });
   }
 
+  const userId = req.user?.id;
+  const userRole = req.user?.role;
+
   try {
-    const result = await participantService.deleteParticipant(id);
+    const result = await participantService.deleteParticipant(
+      id,
+      userId,
+      userRole
+    );
     res.json(result);
   } catch (err) {
     next(err);

@@ -1,24 +1,58 @@
 const pool = require("../db");
 const { AppError } = require("../utils/errors");
+const { createActivityLog } = require("./activityLog.service");
 
 // Create a new location
 const createLocation = async (companyId, locationData) => {
-  const result = await pool.query(
-    `INSERT INTO locations (name, company_id, address, city, country, created_at, updated_at, longitude, latitude)
-     VALUES ($1, $2, $3, $4, $5, NOW(), NOW(), $6, $7)
-     RETURNING *`,
-    [
-      locationData.name,
-      companyId,
-      locationData.address,
-      locationData.city,
-      locationData.country,
-      locationData.longitude,
-      locationData.latitude,
-    ]
-  );
+  const client = await pool.connect();
 
-  return result.rows[0];
+  try {
+    await client.query("BEGIN");
+
+    const result = await client.query(
+      `INSERT INTO locations 
+       (name, company_id, address, city, country, created_at, updated_at, longitude, latitude)
+       VALUES ($1, $2, $3, $4, $5, NOW(), NOW(), $6, $7)
+       RETURNING *`,
+      [
+        locationData.name,
+        companyId,
+        locationData.address,
+        locationData.city,
+        locationData.country,
+        locationData.longitude,
+        locationData.latitude,
+      ]
+    );
+
+    const location = result.rows[0];
+
+    await createActivityLog(
+      {
+        scope: "superadmin",
+        company_id: null,
+        actor_id: null,
+        actor_name: "Superadmin",
+        actor_role: "superadmin",
+        action_type: "ADD_LOCATION",
+        entity_id: location.id,
+        entity_type: "location",
+        description: `A new location "${location.name}" was added by Superadmin.`,
+        status: "Success",
+      },
+      client
+    );
+
+    await client.query("COMMIT");
+
+    return location;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("❌ Error creating location:", err);
+    throw new AppError(`Failed to create location: ${err.message}`, 500);
+  } finally {
+    client.release();
+  }
 };
 
 // Get all locations (optionally filter by company)

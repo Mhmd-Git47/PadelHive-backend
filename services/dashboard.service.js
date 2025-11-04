@@ -137,23 +137,39 @@ const getDashboardStats = async () => {
 
 const getAllTournaments = async (
   limit = 4,
-  orderBy = "created_at",
-  orderDir = "DESC"
+  orderBy = "start_at",
+  orderDir = "ASC"
 ) => {
   try {
-    const query = `SELECT t.id,
+    const query = `
+      SELECT 
+        t.id,
         t.name,
         t.start_at,
         t.completed_at,
         t.participants_count,
         t.state,
         t.private,
-        t.created_at, COALESCE(l.name, 'No locations') AS location_name FROM tournaments t LEFT JOIN locations l ON l.id = t.location_id ORDER BY t.${orderBy} ${orderDir}`;
+        t.created_at,
+        COALESCE(l.name, 'No locations') AS location_name
+      FROM tournaments t
+      LEFT JOIN locations l ON l.id = t.location_id
+      ORDER BY 
+        CASE 
+          WHEN t.private = true THEN 3
+          WHEN t.state = 'in progress' THEN 1
+          WHEN t.state = 'pending' THEN 2
+          WHEN t.state = 'completed' THEN 4
+          ELSE 4
+        END,
+        t.${orderBy} ${orderDir}
+      
+    `;
 
     const res = await pool.query(query);
     return res.rows;
   } catch (err) {
-    console.error("Error fetching tournaments:", err);
+    console.error("❌ Error fetching tournaments:", err);
     throw new AppError("Failed to fetch tournaments", 500);
   }
 };

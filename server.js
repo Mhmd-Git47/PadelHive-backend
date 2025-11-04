@@ -144,6 +144,17 @@ io.on("connection", (socket) => {
     console.log(`👥 ${socket.id} left users_room`);
   });
 
+  // --- NEW ACTIVITY-LOG-RELATED SOCKET EVENTS ---
+  socket.on("joinActivityRoom", () => {
+    socket.join(`activity_room`);
+    console.log(`👥 ${socket.id} joined activity_room`);
+  });
+
+  socket.on("leaveActivityRoom", () => {
+    socket.leave(`activity_room`);
+    console.log(`👥 ${socket.id} left activity_room`);
+  });
+
   socket.on("disconnect", () => {
     console.log("❌ Client disconnected:", socket.id);
   });

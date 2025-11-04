@@ -405,9 +405,8 @@ exports.getUsers = async (req, res, next) => {
 
 exports.getUsersForSuperAdm = async (req, res, next) => {
   try {
-    console.log("hello");
     const result = await authService.getUsersForSuperAdm();
-    console.log(result);
+
     res.json(result);
   } catch (err) {
     next(err);
