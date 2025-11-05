@@ -69,7 +69,7 @@ const createActivityLog = async (
     const newLog = rows[0];
 
     if (global.io) {
-      global.io.to("activity_room").emit("activityUpdated", {
+      const logPayload = {
         action: "create",
         log: {
           id: newLog.id,
@@ -77,7 +77,51 @@ const createActivityLog = async (
           description: newLog.description,
           created_at: newLog.created_at,
         },
-      });
+      };
+
+      switch (scope) {
+        case "superadmin":
+          // 👑 Superadmins see everything globally
+          global.io.to("activity_room").emit("activityUpdated", logPayload);
+          break;
+
+        case "company":
+          // 🏢 Company-level scope
+          if (company_id) {
+            global.io
+              .to(`activity_company_${company_id}`)
+              .emit("activityUpdated", logPayload);
+          }
+
+          // If this log belongs to a specific tournament, emit there too
+          if (tournament_id) {
+            global.io
+              .to(`activity_tournament_${tournament_id}`)
+              .emit("activityUpdated", logPayload);
+          }
+          break;
+
+        case "both":
+          // 🌐 Dual visibility (superadmin + company)
+          global.io.to("activity_room").emit("activityUpdated", logPayload);
+
+          if (company_id) {
+            global.io
+              .to(`activity_company_${company_id}`)
+              .emit("activityUpdated", logPayload);
+          }
+
+          if (tournament_id) {
+            global.io
+              .to(`activity_tournament_${tournament_id}`)
+              .emit("activityUpdated", logPayload);
+          }
+          break;
+
+        default:
+          console.warn("⚠️ Unknown activity log scope:", scope);
+          break;
+      }
     }
 
     return rows[0];
@@ -98,10 +142,27 @@ const getSuperAdmLog = async () => {
 
 const getCompanyAdmLog = async (companyId) => {
   const query = `
-        SELECT * FROM activity_logs WHERE scope = $1 OR scope = $2 AND company_id = $3 ORDER BY created_at desc
-    `;
+    SELECT *
+    FROM activity_logs
+    WHERE (scope = $1 OR scope = $2)
+      AND company_id = $3
+    ORDER BY created_at DESC;
+  `;
 
   const result = await pool.query(query, ["company", "both", companyId]);
+  return result.rows;
+};
+
+const getTournamentLog = async (tournamentId) => {
+  const query = `
+    SELECT *
+    FROM activity_logs
+    WHERE (scope = $1 OR scope = $2)
+      AND tournament_id = $3
+    ORDER BY created_at DESC;
+  `;
+
+  const result = await pool.query(query, ["company", "both", tournamentId]);
   return result.rows;
 };
 
@@ -110,4 +171,5 @@ module.exports = {
   getActorDetails,
   getSuperAdmLog,
   getCompanyAdmLog,
+  getTournamentLog,
 };

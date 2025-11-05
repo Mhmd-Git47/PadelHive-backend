@@ -195,7 +195,7 @@ const createParticipant = async (participantData, userId, userRole) => {
     try {
       await createActivityLog({
         scope: "company",
-        company_id: tournament?.company_id || null,
+        company_id: tournament?.company_id,
         actor_id: userId,
         actor_role: userRole,
         actor_name: actor?.name || "Unknown",

@@ -18,3 +18,13 @@ exports.getCompanyAdmLog = async (req, res, next) => {
     next(err);
   }
 };
+
+exports.getTournamentLog = async (req, res, next) => {
+  try {
+    const tournamentId = req.params.tournamentId;
+    const results = await activityLogService.getTournamentLog(tournamentId);
+    res.json(results);
+  } catch (err) {
+    next(err);
+  }
+};

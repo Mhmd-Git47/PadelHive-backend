@@ -37,10 +37,15 @@ exports.createGroupsWithParticipants = async (req, res) => {
   try {
     const { tournament_id, stage_id, groupsData } = req.body;
 
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
+
     const result = await groupService.createGroupsWithParticipants(
       tournament_id,
       stage_id,
-      groupsData
+      groupsData,
+      userId,
+      userRole
     );
     res.status(201).json(result);
   } catch (err) {
@@ -51,6 +56,8 @@ exports.createGroupsWithParticipants = async (req, res) => {
 
 exports.updateGroupsController = async (req, res) => {
   const { tournament_id, stage_id, groupsData } = req.body;
+  const userId = req.user?.id;
+  const userRole = req.user?.role;
 
   if (!tournament_id || !stage_id || !Array.isArray(groupsData)) {
     return res.status(400).json({ message: "Missing or invalid data." });
@@ -60,7 +67,9 @@ exports.updateGroupsController = async (req, res) => {
     const updatedGroups = await groupService.updateGroupParticipants(
       tournament_id,
       stage_id,
-      groupsData
+      groupsData,
+      userId,
+      userRole
     );
 
     return res.status(200).json({
@@ -77,10 +86,15 @@ exports.updateGroupsController = async (req, res) => {
 exports.generateMatchesAfterGroupConfirmation = async (req, res) => {
   const { tournamentId, stageId } = req.body;
 
+  const userId = req.user?.id;
+  const userRole = req.user?.role;
+
   try {
     const result = await groupService.generateMatchesAfterGroupConfirmation(
       tournamentId,
-      stageId
+      stageId,
+      userId,
+      userRole
     );
     res.status(200).json(result);
   } catch (err) {
@@ -153,8 +167,17 @@ exports.updateGroup = async (req, res) => {
   const { id } = req.params;
   const groupData = req.body;
 
+  const userId = req.user.id;
+  const userRole = req.user.role;
+
   try {
-    const updatedGroups = await groupService.updateGroup(id, groupData);
+    const updatedGroups = await groupService.updateGroup(
+      id,
+      groupData,
+      null,
+      userId,
+      userRole
+    );
 
     return res.status(200).json({
       message: "Group updated successfully.",

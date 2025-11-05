@@ -5,6 +5,7 @@ const multer = require("multer");
 const {
   authenticateToken,
   authorizeRoles,
+  authorizeSuperAdmin,
 } = require("../middleware/auth.middleware");
 
 // ------------------ Multer setup ------------------
@@ -66,6 +67,12 @@ router.put(
   upload.single("image"),
   authenticateToken,
   authController.updateUser
+);
+router.put(
+  "/s-admin/user/:id",
+  authenticateToken,
+  authorizeSuperAdmin,
+  authController.updateUserBySuperAdm
 );
 router.delete("/user/:id", authenticateToken, authController.deleteUser);
 router.delete(

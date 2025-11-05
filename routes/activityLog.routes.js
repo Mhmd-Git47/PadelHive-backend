@@ -21,4 +21,11 @@ router.get(
   activityLogController.getCompanyAdmLog
 );
 
+router.get(
+  "/:tournamentId/tournament",
+  authenticateToken,
+  authorizeRoles("company_admin", "location_admin"),
+  activityLogController.getTournamentLog
+);
+
 module.exports = router;

@@ -60,7 +60,9 @@ exports.markPaymentAsPaid = async (req, res) => {
       return res.status(400).json({ error: "Payment ID is required" });
     }
 
-    const payment = await paymentService.setPaymentPaid(id);
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
+    const payment = await paymentService.setPaymentPaid(id, userId, userRole);
 
     if (!payment) {
       return res.status(404).json({ error: "Payment not found" });
@@ -94,8 +96,16 @@ exports.sendReminderPayment = async (req, res, next) => {
   const userId = req.body.userId;
   const tournamentId = req.body.tournamentId;
 
+  const actorId = req.user?.id;
+  const actorRole = req.user?.role;
+
   try {
-    await paymentService.sendReminderPayment(userId, tournamentId);
+    await paymentService.sendReminderPayment(
+      userId,
+      tournamentId,
+      actorId,
+      actorRole
+    );
     res
       .status(200)
       .json({ message: "Payment reminder email sent successfully." });

@@ -6,6 +6,8 @@ const matchService = require("./match.service");
 const matchHelper = require("../helpers/match.helper");
 
 const { getMatchesByTournamentId } = require("../shared/matchGrouped.shared");
+const { createActivityLog, getActorDetails } = require("./activityLog.service");
+const { AppError } = require("../utils/errors");
 
 const createGroups = async (tournamentId, stageId, groupCount) => {
   const client = await pool.connect();
@@ -42,20 +44,34 @@ const createGroups = async (tournamentId, stageId, groupCount) => {
 const createGroupsWithParticipants = async (
   tournamentId,
   stageId,
-  groupsData
+  groupsData,
+  userId,
+  userRole
 ) => {
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
 
+    const tournamentRes = await client.query(
+      `SELECT id, company_id, name FROM tournaments WHERE id = $1`,
+      [tournamentId]
+    );
+
+    if (tournamentRes.rowCount === 0) {
+      throw new AppError(`Tournament not found`, 404);
+    }
+
+    const tournament = tournamentRes.rows[0];
+    const actor = await getActorDetails(userId, userRole);
+
     const createdGroups = [];
     let i = 0;
 
     for (const group of groupsData) {
-      // scheduled_time is optional
       const scheduledTime = group.scheduled_time || null;
 
+      // 1️⃣ Insert the group
       const groupResult = await client.query(
         `INSERT INTO groups (
            tournament_id, 
@@ -71,24 +87,45 @@ const createGroupsWithParticipants = async (
         [tournamentId, group.name, i, scheduledTime, stageId]
       );
 
-      i++;
-
       const createdGroup = groupResult.rows[0];
       createdGroups.push(createdGroup);
+      i++;
 
-      // Add participants for this group
-      for (const pid of group.participantIds) {
+      // 2️⃣ Insert participants for this group
+      for (const pid of group.participantIds || []) {
         await client.query(
-          `INSERT INTO group_participants (group_id, participant_id) 
+          `INSERT INTO group_participants (group_id, participant_id)
            VALUES ($1, $2);`,
           [createdGroup.id, pid]
         );
+      }
+
+      // 3️⃣ Log activity for this group creation
+      try {
+        await createActivityLog(
+          {
+            scope: "company",
+            company_id: tournament.company_id,
+            actor_id: userId,
+            actor_role: userRole,
+            actor_name: actor.name,
+            action_type: "ADD_TOURNAMENT_GROUP",
+            entity_id: createdGroup.id,
+            entity_type: "group",
+            description: `Group "${createdGroup.name}" created in tournament "${tournament.name}" by ${actor.name}.`,
+            status: "Success",
+            tournament_id: tournamentId,
+          },
+          client
+        );
+      } catch (logErr) {
+        console.error("⚠️ Failed to log group creation:", logErr);
       }
     }
 
     await client.query("COMMIT");
 
-    // ✅ Emit socket event
+    // 4️⃣ Emit socket event with updated groups
     if (global.io) {
       const updatedGroups = await getGroupsByStageId(stageId);
       const groupsWithParticipants = await Promise.all(
@@ -108,6 +145,50 @@ const createGroupsWithParticipants = async (
     return createdGroups;
   } catch (err) {
     await client.query("ROLLBACK");
+    console.error("❌ Error creating groups:", err);
+    // ⚠️ Attempt to log failure
+    try {
+      let actorDetails = null;
+
+      // Safely attempt to fetch actor only if missing
+      try {
+        actorDetails = await getActorDetails(userId, userRole);
+      } catch (actorErr) {
+        console.warn("⚠️ Could not fetch actor details:", actorErr);
+      }
+
+      // Try fetching tournament info too
+      let tournament = null;
+      try {
+        const tournamentRes = await pool.query(
+          `SELECT id, company_id, name FROM tournaments WHERE id = $1`,
+          [tournamentId]
+        );
+        tournament = tournamentRes.rows[0] || null;
+      } catch (tErr) {
+        console.warn("⚠️ Could not fetch tournament for failure log:", tErr);
+      }
+
+      // Log failure safely
+      await createActivityLog({
+        scope: "company",
+        company_id: tournament?.company_id || null,
+        actor_id: userId,
+        actor_role: userRole,
+        actor_name: actorDetails?.name || "Unknown",
+        action_type: "ADD_TOURNAMENT_GROUP_FAILED",
+        entity_id: null,
+        entity_type: "group",
+        description: `Failed to create groups for tournament "${
+          tournament?.name || tournamentId
+        }". Error: ${err.message}`,
+        status: "Failed",
+        tournament_id: tournamentId,
+      });
+    } catch (logErr) {
+      console.error("⚠️ Failed to log group creation failure:", logErr);
+    }
+
     throw err;
   } finally {
     client.release();
@@ -115,55 +196,136 @@ const createGroupsWithParticipants = async (
 };
 
 // if need to update groups to another
-const updateGroupParticipants = async (tournamentId, stageId, groupsData) => {
+const updateGroupParticipants = async (
+  tournamentId,
+  stageId,
+  groupsData,
+  userId,
+  userRole
+) => {
   const client = await pool.connect();
+
   try {
     await client.query("BEGIN");
 
+    // 🔹 Fetch tournament info for logging
+    const tournamentRes = await client.query(
+      `SELECT id, name, company_id FROM tournaments WHERE id=$1`,
+      [tournamentId]
+    );
+    if (tournamentRes.rowCount === 0) {
+      throw new AppError("Tournament not found", 404);
+    }
+
+    const tournament = tournamentRes.rows[0];
+    const actor = await getActorDetails(userId, userRole);
+
+    // 🔹 Get existing groups
     const existingGroupsRes = await client.query(
       `SELECT * FROM groups WHERE tournament_id=$1 AND stage_id=$2 ORDER BY group_index`,
       [tournamentId, stageId]
     );
     const existingGroups = existingGroupsRes.rows;
 
+    const updatedGroups = [];
+    const createdGroups = [];
+    const deletedGroups = [];
+
     for (let i = 0; i < groupsData.length; i++) {
       const groupData = groupsData[i];
       let groupId;
 
       if (existingGroups[i]) {
-        // Update existing group
+        // 🟢 Update existing group
         groupId = existingGroups[i].id;
+
         await client.query(
           `UPDATE groups SET name=$1, updated_at=NOW() WHERE id=$2`,
           [groupData.name, groupId]
         );
+
         await client.query(`DELETE FROM group_participants WHERE group_id=$1`, [
           groupId,
         ]);
+
+        for (const pid of groupData.participantIds || []) {
+          await client.query(
+            `INSERT INTO group_participants (group_id, participant_id) VALUES ($1,$2)`,
+            [groupId, pid]
+          );
+        }
+
+        updatedGroups.push(groupId);
+
+        // ✅ Log update activity
+        try {
+          await createActivityLog(
+            {
+              scope: "company",
+              company_id: tournament.company_id,
+              actor_id: userId,
+              actor_role: userRole,
+              actor_name: actor.name,
+              action_type: "UPDATE_TOURNAMENT_GROUP",
+              entity_id: groupId,
+              entity_type: "group",
+              description: `Group "${groupData.name}" updated by ${actor.name} in tournament "${tournament.name}".`,
+              status: "Success",
+              tournament_id: tournamentId,
+            },
+            client
+          );
+        } catch (logErr) {
+          console.error("⚠️ Failed to log group update:", logErr);
+        }
       } else {
-        // Insert new group
+        // 🟢 Create new group
         const res = await client.query(
           `INSERT INTO groups (tournament_id, stage_id, name, group_index, created_at, updated_at)
            VALUES ($1,$2,$3,$4,NOW(),NOW()) RETURNING id`,
           [tournamentId, stageId, groupData.name, i]
         );
         groupId = res.rows[0].id;
-      }
 
-      // Insert participants
-      for (const pid of groupData.participantIds) {
-        await client.query(
-          `INSERT INTO group_participants (group_id, participant_id) VALUES ($1,$2)`,
-          [groupId, pid]
-        );
+        for (const pid of groupData.participantIds || []) {
+          await client.query(
+            `INSERT INTO group_participants (group_id, participant_id) VALUES ($1,$2)`,
+            [groupId, pid]
+          );
+        }
+
+        createdGroups.push(groupId);
+
+        // ✅ Log creation activity
+        try {
+          await createActivityLog(
+            {
+              scope: "company",
+              company_id: tournament.company_id,
+              actor_id: userId,
+              actor_role: userRole,
+              actor_name: actor.name,
+              action_type: "ADD_TOURNAMENT_GROUP",
+              entity_id: groupId,
+              entity_type: "group",
+              description: `New group "${groupData.name}" created by ${actor.name} in tournament "${tournament.name}".`,
+              status: "Success",
+              tournament_id: tournamentId,
+            },
+            client
+          );
+        } catch (logErr) {
+          console.error("⚠️ Failed to log group creation:", logErr);
+        }
       }
     }
 
-    // Optionally: remove extra old groups
+    // 🔴 Delete extra old groups
     if (existingGroups.length > groupsData.length) {
       const idsToRemove = existingGroups
         .slice(groupsData.length)
         .map((g) => g.id);
+
       await client.query(
         `DELETE FROM group_participants WHERE group_id = ANY($1::int[])`,
         [idsToRemove]
@@ -171,16 +333,60 @@ const updateGroupParticipants = async (tournamentId, stageId, groupsData) => {
       await client.query(`DELETE FROM groups WHERE id = ANY($1::int[])`, [
         idsToRemove,
       ]);
+
+      deletedGroups.push(...idsToRemove);
+
+      // ✅ Log deletions
+      for (const gid of idsToRemove) {
+        try {
+          await createActivityLog(
+            {
+              scope: "company",
+              company_id: tournament.company_id,
+              actor_id: userId,
+              actor_role: userRole,
+              actor_name: actor.name,
+              action_type: "DELETE_TOURNAMENT_GROUP",
+              entity_id: gid,
+              entity_type: "group",
+              description: `Group ID ${gid} deleted by ${actor.name} in tournament "${tournament.name}".`,
+              status: "Success",
+              tournament_id: tournamentId,
+            },
+            client
+          );
+        } catch (logErr) {
+          console.error("⚠️ Failed to log group deletion:", logErr);
+        }
+      }
     }
 
     await client.query("COMMIT");
 
-    // Emit updated groups with stable IDs
-    // Emit updated groups with participants
+    // 🧾 Summary log (one overall success)
+    try {
+      await createActivityLog({
+        scope: "company",
+        company_id: tournament.company_id,
+        actor_id: userId,
+        actor_role: userRole,
+        actor_name: actor.name,
+        action_type: "UPDATE_GROUPS_SUMMARY",
+        entity_id: null,
+        entity_type: "group",
+        description: `${createdGroups.length} group(s) created, ${updatedGroups.length} updated, and ${deletedGroups.length} deleted by ${actor.name} in tournament "${tournament.name}".`,
+        status: "Success",
+        tournament_id: tournamentId,
+      });
+    } catch (logErr) {
+      console.error("⚠️ Failed to log summary:", logErr);
+    }
+
+    // 🔔 Emit updates via socket
     if (global.io) {
-      const updatedGroups = await getGroupsByStageId(stageId);
+      const updatedGroupsList = await getGroupsByStageId(stageId);
       const groupsWithParticipants = await Promise.all(
-        updatedGroups.map(async (g) => {
+        updatedGroupsList.map(async (g) => {
           const participants = await getParticipantsByGroupId(g.id);
           return { ...g, participants };
         })
@@ -194,6 +400,42 @@ const updateGroupParticipants = async (tournamentId, stageId, groupsData) => {
     }
   } catch (err) {
     await client.query("ROLLBACK");
+    console.error("❌ Error updating groups:", err);
+
+    // 🟥 Log failure
+    try {
+      let actorDetails = null;
+      try {
+        actorDetails = await getActorDetails(userId, userRole);
+      } catch (actorErr) {
+        console.warn("⚠️ Could not fetch actor details:", actorErr);
+      }
+
+      const tournamentRes = await pool.query(
+        `SELECT id, name, company_id FROM tournaments WHERE id=$1`,
+        [tournamentId]
+      );
+      const tournament = tournamentRes.rows[0];
+
+      await createActivityLog({
+        scope: "company",
+        company_id: tournament?.company_id || null,
+        actor_id: userId,
+        actor_role: userRole,
+        actor_name: actorDetails?.name || "Unknown",
+        action_type: "UPDATE_TOURNAMENT_GROUP_FAILED",
+        entity_id: null,
+        entity_type: "group",
+        description: `Failed to update groups for tournament "${
+          tournament?.name || tournamentId
+        }". Error: ${err.message}`,
+        status: "Failed",
+        tournament_id: tournamentId,
+      });
+    } catch (logErr) {
+      console.error("⚠️ Failed to log group update failure:", logErr);
+    }
+
     throw err;
   } finally {
     client.release();
@@ -201,27 +443,117 @@ const updateGroupParticipants = async (tournamentId, stageId, groupsData) => {
 };
 
 // groups are generated previously, this function only generate matches and stages...
-const generateMatchesAfterGroupConfirmation = async (tournamentId, stageId) => {
+const generateMatchesAfterGroupConfirmation = async (
+  tournamentId,
+  stageId,
+  userId,
+  userRole
+) => {
   const client = await pool.connect();
 
-  const existingMatches = await pool.query(
-    `SELECT COUNT(*) FROM matches WHERE tournament_id = $1 AND stage_id = $2`,
-    [tournamentId, stageId]
-  );
-
-  if (Number(existingMatches.rows[0].count) > 0) {
-    throw new Error("Matches have already been generated for this stage.");
-  }
-
   try {
+    // 🔹 Step 1: Prevent duplicate generation
+    const existingMatches = await pool.query(
+      `SELECT COUNT(*) FROM matches WHERE tournament_id = $1 AND stage_id = $2`,
+      [tournamentId, stageId]
+    );
+
+    if (Number(existingMatches.rows[0].count) > 0) {
+      throw new AppError(
+        "Matches have already been generated for this stage.",
+        400
+      );
+    }
+
     await client.query("BEGIN");
 
+    // 🔹 Step 2: Fetch tournament and actor info for logging
+    const tournamentRes = await client.query(
+      `SELECT id, name, company_id FROM tournaments WHERE id = $1`,
+      [tournamentId]
+    );
+    if (tournamentRes.rowCount === 0) {
+      throw new AppError("Tournament not found", 404);
+    }
+
+    const tournament = tournamentRes.rows[0];
+    const actor = await getActorDetails(userId, userRole);
+
+    // 🔹 Step 3: Generate matches
     await matchHelper.generateMatchesForStages(tournamentId, stageId, client);
 
     await client.query("COMMIT");
+
+    // 🟢 Step 4: Log success
+    try {
+      await createActivityLog(
+        {
+          scope: "company",
+          company_id: tournament.company_id,
+          actor_id: userId,
+          actor_role: userRole,
+          actor_name: actor.name,
+          action_type: "GENERATE_MATCHES",
+          entity_id: null,
+          entity_type: "match",
+          description: `Matches successfully generated for stage ID ${stageId} in tournament "${tournament.name}" by ${actor.name}.`,
+          status: "Success",
+          tournament_id: tournamentId,
+        },
+        client
+      );
+    } catch (logErr) {
+      console.error("⚠️ Failed to log match generation success:", logErr);
+    }
+
+    // 🔔 Emit socket update
+    if (global.io) {
+      global.io.to(`tournament_${tournamentId}`).emit("matches-generated", {
+        tournamentId,
+        stageId,
+        message: "Matches have been generated successfully.",
+      });
+    }
+
     return { message: "Matches generated successfully." };
   } catch (err) {
     await client.query("ROLLBACK");
+    console.error("❌ Error generating matches:", err);
+
+    // 🔴 Step 5: Log failure
+    try {
+      let actorDetails = null;
+      try {
+        actorDetails = await getActorDetails(userId, userRole);
+      } catch (actorErr) {
+        console.warn("⚠️ Could not fetch actor details:", actorErr);
+      }
+
+      const tournamentRes = await pool.query(
+        `SELECT id, name, company_id FROM tournaments WHERE id = $1`,
+        [tournamentId]
+      );
+      const tournament = tournamentRes.rows[0];
+
+      await createActivityLog({
+        scope: "company",
+        company_id: tournament?.company_id || null,
+        actor_id: userId,
+        actor_role: userRole,
+        actor_name: actorDetails?.name || "Unknown",
+        action_type: "GENERATE_MATCHES_FAILED",
+        entity_id: null,
+        entity_type: "match",
+        description: `Failed to generate matches for stage ID ${stageId} in tournament "${
+          tournament?.name || tournamentId
+        }". Error: ${err.message}`,
+        status: "Failed",
+        tournament_id: tournamentId,
+      });
+    } catch (logErr) {
+      console.error("⚠️ Failed to log match generation failure:", logErr);
+    }
+
     throw err;
   } finally {
     client.release();
@@ -459,7 +791,7 @@ async function getSortedGroupStandings(tournamentId) {
   return groupedStats;
 }
 
-const updateGroup = async (id, updatedData, clientt) => {
+const updateGroup = async (id, updatedData, clientt, userId, userRole) => {
   const client = clientt || (await pool.connect());
 
   if (Object.keys(updatedData).length === 0) {
@@ -488,7 +820,55 @@ const updateGroup = async (id, updatedData, clientt) => {
     const result = await client.query(query, values);
     const updatedGroup = result.rows[0];
 
-    // Only check stage state if group state was updated to 'completed'
+    // ✅ If group not found
+    if (!updatedGroup) {
+      throw new Error("Group not found");
+    }
+
+    // ✅ Only log if scheduled_time was updated
+    if ("scheduled_time" in updatedData) {
+      try {
+        const tournamentRes = await client.query(
+          `SELECT id, company_id FROM tournaments WHERE id = $1`,
+          [updatedGroup.tournament_id]
+        );
+
+        if (tournamentRes.rowCount === 0) {
+          throw new AppError(`Tournament is not found`, 401);
+        }
+
+        const tournament = tournamentRes.rows[0];
+
+        const actor = await getActorDetails(userId, userRole);
+
+        await createActivityLog(
+          {
+            scope: "company",
+            company_id: tournament.company_id,
+            actor_id: userId,
+            actor_role: userRole,
+            actor_name: actor?.name || "Unknown",
+            action_type: "GROUP_SCHEDULE_UPDATED",
+            entity_id: updatedGroup.id,
+            entity_type: "group",
+            description: `Group "${
+              updatedGroup.name
+            }" scheduled time updated to ${
+              updatedData.scheduled_time
+                ? new Date(updatedData.scheduled_time).toLocaleString()
+                : "unspecified time"
+            }.`,
+            status: "Success",
+            tournament_id: updatedGroup.tournament_id,
+          },
+          client
+        );
+      } catch (logErr) {
+        console.error("⚠️ Failed to log group schedule update:", logErr);
+      }
+    }
+
+    // ✅ If stage is completed after this update
     if (updatedGroup.stage_id && updatedGroup.state === "completed") {
       const stageGroupsRes = await client.query(
         `SELECT state FROM groups WHERE stage_id = $1`,
@@ -513,19 +893,35 @@ const updateGroup = async (id, updatedData, clientt) => {
     if (global.io) {
       global.io
         .to(`tournament_${updatedGroup.tournament_id}`)
-        .emit("groups-updated", {
-          group: updatedGroup,
-        });
+        .emit("groups-updated", { group: updatedGroup });
     }
 
     return updatedGroup;
   } catch (err) {
     await client.query("ROLLBACK");
+
+    // 🔥 Optional: log failed update attempt
+    try {
+      const actor = await getActorDetails(userId, userRole);
+      await createActivityLog({
+        scope: "company",
+        company_id: null,
+        actor_id: userId,
+        actor_role: userRole,
+        actor_name: actor?.name || "Unknown",
+        action_type: "GROUP_UPDATE_FAILED",
+        entity_id: id,
+        entity_type: "group",
+        description: `Failed to update group ${id}: ${err.message}`,
+        status: "Failed",
+      });
+    } catch (logErr) {
+      console.error("⚠️ Failed to log group update error:", logErr);
+    }
+
     throw err;
   } finally {
-    if (!clientt) {
-      client.release();
-    }
+    if (!clientt) client.release();
   }
 };
 

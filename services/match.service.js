@@ -12,6 +12,7 @@ const { generateRoundRobin } = require("../helpers/roundRobin");
 const groupService = require("./group.service");
 const stageService = require("./stage.service");
 const { AppError } = require("../utils/errors");
+const { getActorDetails, createActivityLog } = require("./activityLog.service");
 
 const getAllMatches = async () => {
   const matches = await pool.query(`SELECT * FROM matches ORDER BY id`);
@@ -550,15 +551,15 @@ const getMatchesByUserId = async (userId) => {
 };
 
 // delete matches groupstage + final stage
-const deleteTournamentMatches = async (tournamentId) => {
+const deleteTournamentMatches = async (tournamentId, userId, userRole) => {
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
 
-    // 1. Check if tournament exists
+    // 1️⃣ Fetch tournament info for validation + logging
     const tournamentRes = await client.query(
-      `SELECT 1 FROM tournaments WHERE id = $1`,
+      `SELECT id, name, company_id FROM tournaments WHERE id = $1`,
       [tournamentId]
     );
 
@@ -566,7 +567,10 @@ const deleteTournamentMatches = async (tournamentId) => {
       throw new AppError("Tournament not available.", 420);
     }
 
-    // 2. Get Final Stage ID
+    const tournament = tournamentRes.rows[0];
+    const actor = await getActorDetails(userId, userRole);
+
+    // 2️⃣ Get Final Stage ID
     const finalStageRes = await client.query(
       `SELECT id FROM stages WHERE tournament_id = $1 AND name = $2`,
       [tournamentId, "Final Stage"]
@@ -578,21 +582,91 @@ const deleteTournamentMatches = async (tournamentId) => {
       throw new AppError("Final Stage not found.", 421);
     }
 
-    // 3. Delete stage participants (for fresh matches)
+    // 3️⃣ Delete stage participants (for fresh matches)
     await client.query(`DELETE FROM stage_participants WHERE stage_id = $1`, [
       finalStageId,
     ]);
 
-    // 4. Delete matches for the tournament
-    await client.query(`DELETE FROM matches WHERE tournament_id = $1`, [
-      tournamentId,
-    ]);
+    // 4️⃣ Delete matches for the tournament
+    const deleteRes = await client.query(
+      `DELETE FROM matches WHERE tournament_id = $1 RETURNING id`,
+      [tournamentId]
+    );
 
-    // 5. Commit transaction
+    const deletedCount = deleteRes.rowCount;
+
+    // 5️⃣ Commit transaction
     await client.query("COMMIT");
+
+    // 🟢 6️⃣ Log success
+    try {
+      await createActivityLog(
+        {
+          scope: "company",
+          company_id: tournament.company_id,
+          actor_id: userId,
+          actor_role: userRole,
+          actor_name: actor.name,
+          action_type: "DELETE_TOURNAMENT_MATCHES",
+          entity_id: null,
+          entity_type: "match",
+          description: `${deletedCount} match(es) deleted from tournament "${tournament.name}" (Final Stage ID: ${finalStageId}) by ${actor.name}.`,
+          status: "Success",
+          tournament_id: tournamentId,
+        },
+        client
+      );
+    } catch (logErr) {
+      console.error("⚠️ Failed to log match deletion success:", logErr);
+    }
+
+    // 🔔 Optional: Emit socket event
+    if (global.io) {
+      global.io.to(`tournament_${tournamentId}`).emit("matches-deleted", {
+        tournamentId,
+        message: "All matches were deleted successfully.",
+      });
+    }
+
+    return { message: `${deletedCount} matches deleted successfully.` };
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error("Error in deleteMatches:", err);
+    console.error("❌ Error deleting tournament matches:", err);
+
+    // 🔴 Log failure
+    try {
+      let actorDetails = null;
+      try {
+        actorDetails = await getActorDetails(userId, userRole);
+      } catch (actorErr) {
+        console.warn("⚠️ Could not fetch actor details:", actorErr);
+      }
+
+      const tournamentRes = await pool.query(
+        `SELECT id, name, company_id FROM tournaments WHERE id = $1`,
+        [tournamentId]
+      );
+      const tournament = tournamentRes.rows[0];
+
+      await createActivityLog({
+        scope: "company",
+        company_id: tournament?.company_id || null,
+        actor_id: userId,
+        actor_role: userRole,
+        actor_name: actorDetails?.name || "Unknown",
+        action_type: "DELETE_TOURNAMENT_MATCHES_FAILED",
+        entity_id: null,
+        entity_type: "match",
+        description: `Failed to delete matches for tournament "${
+          tournament?.name || tournamentId
+        }". Error: ${err.message}`,
+        status: "Failed",
+        tournament_id: tournamentId,
+      });
+    } catch (logErr) {
+      console.error("⚠️ Failed to log match deletion failure:", logErr);
+    }
+
     throw new AppError("Failed removing matches", 400);
   } finally {
     client.release();

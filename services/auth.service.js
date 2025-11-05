@@ -1110,6 +1110,7 @@ const verifyAndInsertUser = async (token) => {
       actor_role: "user",
       action_type: "ADD_USER",
       entity_type: "user",
+      entity_id: newUser.id,
       description: `New user has been created: ${newUser.display_name}`,
       status: "Success",
     });
@@ -1296,6 +1297,110 @@ const updateUser = async (userId, userData) => {
   } catch (err) {
     if (err instanceof AppError) throw err; // preserve intentional errors
     console.log(err);
+    throw new AppError("Error while updating user", 500);
+  } finally {
+    client.release();
+  }
+};
+
+const updateUserBySuperAdm = async (userId, userData) => {
+  const client = await pool.connect();
+
+  try {
+    // Step 1️⃣: Check if email or display_name already exist (and belong to another user)
+    if (userData.email || userData.display_name) {
+      const checks = [];
+      const values = [];
+      let idx = 1;
+
+      if (userData.email) {
+        checks.push(`email = $${idx++}`);
+        values.push(userData.email);
+      }
+
+      if (userData.display_name) {
+        checks.push(`display_name = $${idx++}`);
+        values.push(userData.display_name);
+      }
+
+      const query = `
+        SELECT id, email, display_name
+        FROM users
+        WHERE (${checks.join(" OR ")})
+          AND id <> $${idx};
+      `;
+      values.push(userId);
+
+      const existing = await client.query(query, values);
+
+      if (existing.rows.length > 0) {
+        const conflicts = [];
+        for (const row of existing.rows) {
+          if (row.email === userData.email) conflicts.push("email");
+          if (row.display_name === userData.display_name)
+            conflicts.push("display name");
+        }
+        throw new AppError(`Duplicate ${conflicts.join(" and ")} found`, 400);
+      }
+    }
+
+    // Step 2️⃣: Build update dynamically
+    const fields = [];
+    const values = [];
+    let idx = 1;
+
+    for (const [key, rawValue] of Object.entries(userData)) {
+      if (rawValue === undefined) continue;
+
+      const column = (() => {
+        switch (key) {
+          case "firstName":
+            return "first_name";
+          case "lastName":
+            return "last_name";
+          case "phoneNumber":
+            return "phone_number";
+          case "dateOfBirth":
+            return "date_of_birth";
+          case "imageName":
+            return "image_url";
+          default:
+            return key;
+        }
+      })();
+
+      const value =
+        column === "date_of_birth" && rawValue ? new Date(rawValue) : rawValue;
+
+      fields.push(`${column} = $${idx}`);
+      values.push(value);
+      idx++;
+    }
+
+    // Always update updated_at
+    fields.push(`updated_at = NOW()`);
+
+    const query = `
+      UPDATE users
+      SET ${fields.join(", ")}
+      WHERE id = $${idx}
+      RETURNING *;
+    `;
+
+    values.push(userId);
+
+    // Step 3️⃣: Run the update
+    const result = await client.query(query, values);
+
+    if (result.rows.length === 0) {
+      throw new AppError("User not updated", 401);
+    }
+
+    const updatedUser = result.rows[0];
+    return updatedUser;
+  } catch (err) {
+    if (err instanceof AppError) throw err; // preserve intentional errors
+    console.error("❌ updateUserBySuperAdm error:", err);
     throw new AppError("Error while updating user", 500);
   } finally {
     client.release();
@@ -1656,6 +1761,7 @@ module.exports = {
   verifyAndInsertUser,
   getUserById,
   updateUser,
+  updateUserBySuperAdm,
   lookupUser,
   deleteUser,
   getUsers,

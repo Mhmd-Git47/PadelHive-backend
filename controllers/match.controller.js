@@ -129,8 +129,11 @@ exports.deleteTournamentMatches = async (req, res, next) => {
     return res.status(400).json({ message: "Invalid tournament ID" });
   }
 
+  const userId = req.user?.id;
+  const userRole = req.user?.role;
+
   try {
-    await matchService.deleteTournamentMatches(tournamentId);
+    await matchService.deleteTournamentMatches(tournamentId, userId, userRole);
     return res.status(200).json({ message: "Matches successfully deleted." });
   } catch (error) {
     next(error);

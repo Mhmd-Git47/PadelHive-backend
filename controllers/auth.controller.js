@@ -494,6 +494,71 @@ exports.updateUser = async (req, res, next) => {
   }
 };
 
+exports.updateUserBySuperAdm = async (req, res, next) => {
+  try {
+    const userId = req.params.id;
+
+    // 1️⃣ Only superadmin can update users
+    if (req.user.role !== "superadmin") {
+      return res
+        .status(403)
+        .json({ message: "Forbidden: Only superadmin can update users" });
+    }
+
+    // 2️⃣ Check if user exists
+    const existingUser = await authService.getUserById(userId);
+    if (!existingUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // 3️⃣ Prepare allowed fields safely (ignore undefined)
+    const userData = {};
+    const mapKeys = {
+      first_name: "firstName",
+      last_name: "lastName",
+      email: "email",
+      display_name: "display_name",
+      nationality: "nationality",
+      gender: "gender",
+      address: "address",
+      date_of_birth: "dateOfBirth",
+      phone_number: "phone_number",
+    };
+
+    for (const [reqKey, modelKey] of Object.entries(mapKeys)) {
+      const value = req.body[reqKey];
+      if (value !== undefined && value !== null && value !== "") {
+        // for date_of_birth, keep existing if invalid or empty
+        if (reqKey === "date_of_birth") {
+          userData[modelKey] = new Date(value) || existingUser.dateOfBirth;
+        } else {
+          userData[modelKey] = value;
+        }
+      }
+    }
+
+    // If nothing to update
+    if (Object.keys(userData).length === 0) {
+      return res.status(400).json({ message: "No valid fields to update" });
+    }
+
+    // 4️⃣ Update user in DB
+    const updatedUser = await authService.updateUserBySuperAdm(
+      userId,
+      userData
+    );
+
+    // 5️⃣ Send result
+    return res.status(200).json({
+      message: "User updated successfully",
+      user: updatedUser,
+    });
+  } catch (err) {
+    console.error("❌ Update user error:", err);
+    next(err);
+  }
+};
+
 exports.lookupUser = async (req, res, next) => {
   const { identifier } = req.query;
 

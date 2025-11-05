@@ -5,6 +5,8 @@ const {
   sendPaymentReminderEmail,
 } = require("../helpers/email.helper");
 
+const { getActorDetails, createActivityLog } = require("./activityLog.service");
+
 const createPaymentParticipant = async (participantData, client) => {
   const {
     participant_id,
@@ -140,8 +142,9 @@ const updatePayment = async (id, updatedData) => {
   return result.rows[0];
 };
 
-const setPaymentPaid = async (id) => {
+const setPaymentPaid = async (id, userId, userRole) => {
   const client = await pool.connect();
+
   try {
     await client.query("BEGIN");
 
@@ -163,7 +166,7 @@ const setPaymentPaid = async (id) => {
     const user = userRes.rows[0];
 
     const tournamentRes = await client.query(
-      `SELECT id, name, start_at FROM tournaments WHERE id = $1`,
+      `SELECT id, name, company_id, start_at FROM tournaments WHERE id = $1`,
       [payment.tournament_id]
     );
     const tournament = tournamentRes.rows[0];
@@ -175,22 +178,77 @@ const setPaymentPaid = async (id) => {
       RETURNING *;
     `;
     const result = await client.query(query, ["paid", id]);
+    const updatedPayment = result.rows[0];
 
     await client.query("COMMIT");
+
+    // ✅ Log success activity
+    try {
+      const actor = await getActorDetails(userId, userRole);
+
+      await createActivityLog({
+        scope: "company",
+        company_id: tournament?.company_id || null,
+        actor_id: userId,
+        actor_role: userRole,
+        actor_name: actor?.name || "Unknown",
+        action_type: "PAYMENT_MARKED_PAID",
+        entity_id: updatedPayment.id,
+        entity_type: "payment",
+        description: `Payment of $${payment.amount} for "${
+          user.display_name
+        }" in tournament "${
+          tournament?.name || "Unknown Tournament"
+        }" marked as paid by ${actor?.name || "System"}.`,
+        status: "Success",
+        tournament_id: payment.tournament_id,
+      });
+    } catch (logErr) {
+      console.error("⚠️ Failed to log payment update:", logErr);
+    }
 
     // ✅ trigger email send but don’t block response
     if (user && tournament) {
       sendTournamentPaymentConfirmationEmail(user, tournament, {
         amount: payment.amount,
-        date: result.rows[0].paid_at,
+        date: updatedPayment.paid_at,
       }).catch((err) => {
         console.error("❌ Failed to send payment confirmation email:", err);
       });
     }
 
-    return result.rows[0];
+    return updatedPayment;
   } catch (err) {
     await client.query("ROLLBACK");
+
+    // ❌ Log failure
+    try {
+      const actor = await getActorDetails(userId, userRole);
+      const tournamentRes = await pool.query(
+        `SELECT id, name, company_id FROM tournaments WHERE id = (
+           SELECT tournament_id FROM payments WHERE id = $1
+         )`,
+        [id]
+      );
+      const tournament = tournamentRes.rows[0];
+
+      await createActivityLog({
+        scope: "company",
+        company_id: tournament?.company_id || null,
+        actor_id: userId,
+        actor_role: userRole,
+        actor_name: actor?.name || "Unknown",
+        action_type: "PAYMENT_MARKED_PAID_FAILED",
+        entity_id: id,
+        entity_type: "payment",
+        description: `Failed to mark payment ${id} as paid. Error: ${err.message}`,
+        status: "Failed",
+        tournament_id: tournament?.id || null,
+      });
+    } catch (logErr) {
+      console.error("⚠️ Failed to log failed payment action:", logErr);
+    }
+
     console.error("Error updating payment:", err);
     throw err;
   } finally {
@@ -219,37 +277,102 @@ const deletePaymentParticipant = async (
   );
 };
 
-const sendReminderPayment = async (userId, tournamentId) => {
-  const paymentRes = await pool.query(
-    `SELECT amount, due_date FROM payments WHERE user_id = $1 AND tournament_id = $2`,
-    [userId, tournamentId]
-  );
+const sendReminderPayment = async (
+  userId,
+  tournamentId,
+  actorId,
+  actorRole
+) => {
+  const client = await pool.connect();
 
-  const payment = paymentRes.rows[0];
-  if (!payment) {
-    throw new AppError(
-      "No Payment found for the user in this tournament.",
-      404
+  try {
+    const paymentRes = await client.query(
+      `SELECT amount, due_date FROM payments WHERE user_id = $1 AND tournament_id = $2`,
+      [userId, tournamentId]
     );
-  }
 
-  const userRes = await pool.query(
-    `SELECT id, email, display_name FROM users WHERE id = $1`,
-    [userId]
-  );
-  const user = userRes.rows[0];
+    const payment = paymentRes.rows[0];
+    if (!payment) {
+      throw new AppError(
+        "No Payment found for the user in this tournament.",
+        404
+      );
+    }
 
-  const tournamentRes = await pool.query(
-    `SELECT id, name, start_at, category FROM tournaments WHERE id = $1`,
-    [tournamentId]
-  );
-  const tournament = tournamentRes.rows[0];
+    const userRes = await client.query(
+      `SELECT id, email, display_name FROM users WHERE id = $1`,
+      [userId]
+    );
+    const user = userRes.rows[0];
 
-  if (user && tournament) {
-    await sendPaymentReminderEmail(user, {
-      ...tournament,
-      entry_fee: payment.amount,
-    });
+    const tournamentRes = await client.query(
+      `SELECT id, name, start_at, category, company_id FROM tournaments WHERE id = $1`,
+      [tournamentId]
+    );
+    const tournament = tournamentRes.rows[0];
+
+    // ✅ Send the actual reminder email
+    if (user && tournament) {
+      await sendPaymentReminderEmail(user, {
+        ...tournament,
+        entry_fee: payment.amount,
+      });
+
+      // ✅ Log success
+      try {
+        const actor = await getActorDetails(actorId, actorRole);
+
+        await createActivityLog({
+          scope: "company",
+          company_id: tournament.company_id,
+          actor_id: actorId,
+          actor_role: actorRole,
+          actor_name: actor?.name || "Unknown",
+          action_type: "PAYMENT_REMINDER_SENT",
+          entity_id: user.id,
+          entity_type: "user",
+          description: `Payment reminder sent to ${user.display_name} (${user.email}) for tournament "${tournament.name}" (amount: $${payment.amount}).`,
+          status: "Success",
+          tournament_id: tournamentId,
+        });
+      } catch (logErr) {
+        console.error("⚠️ Failed to log payment reminder activity:", logErr);
+      }
+    }
+  } catch (err) {
+    console.error("❌ Error sending payment reminder:", err);
+
+    // ❌ Log failure
+    try {
+      const actor = await getActorDetails(actorId, actorRole);
+      const tournamentRes = await pool.query(
+        `SELECT id, name, company_id FROM tournaments WHERE id = $1`,
+        [tournamentId]
+      );
+      const tournament = tournamentRes.rows[0];
+
+      await createActivityLog({
+        scope: "company",
+        company_id: tournament?.company_id || null,
+        actor_id: actorId,
+        actor_role: actorRole,
+        actor_name: actor?.name || "Unknown",
+        action_type: "PAYMENT_REMINDER_FAILED",
+        entity_id: userId,
+        entity_type: "user",
+        description: `Failed to send payment reminder to user ${userId} for tournament "${
+          tournament?.name || "Unknown"
+        }". Error: ${err.message}`,
+        status: "Failed",
+        tournament_id: tournamentId,
+      });
+    } catch (logErr) {
+      console.error("⚠️ Failed to log failed reminder action:", logErr);
+    }
+
+    throw err;
+  } finally {
+    client.release();
   }
 };
 

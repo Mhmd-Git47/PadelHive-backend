@@ -116,26 +116,26 @@ tournamentCron.setSocketInstance(io);
 io.on("connection", (socket) => {
   console.log("✅ Client connected:", socket.id);
 
-  // Client joins a tournament room
+  // ─────────── 🎾 TOURNAMENT ROOMS ───────────
   socket.on("joinTournament", (tournamentId) => {
     socket.join(`tournament_${tournamentId}`);
-    console.log(`📌 Client ${socket.id} joined tournament_${tournamentId}`);
+    console.log(`📌 ${socket.id} joined tournament_${tournamentId}`);
   });
 
-  // Client leaves a tournament room
   socket.on("leaveTournament", (tournamentId) => {
     socket.leave(`tournament_${tournamentId}`);
-    console.log(`📌 Client ${socket.id} left tournament_${tournamentId}`);
+    console.log(`📌 ${socket.id} left tournament_${tournamentId}`);
   });
 
+  // ─────────── 📧 EMAIL VERIFICATION ───────────
   socket.on("watchEmailVerification", (email) => {
     socket.join(`verify_${email}`);
-    console.log(`📌 Client ${socket.id} is watching email ${email}`);
+    console.log(`📌 ${socket.id} is watching email ${email}`);
   });
 
-  // --- NEW USER-RELATED SOCKET EVENTS ---
+  // ─────────── 👥 USER MANAGEMENT ───────────
   socket.on("joinUsersRoom", () => {
-    socket.join(`users_room`);
+    socket.join("users_room");
     console.log(`👥 ${socket.id} joined users_room`);
   });
 
@@ -144,17 +144,45 @@ io.on("connection", (socket) => {
     console.log(`👥 ${socket.id} left users_room`);
   });
 
-  // --- NEW ACTIVITY-LOG-RELATED SOCKET EVENTS ---
+  // ─────────── 🕓 ACTIVITY LOGS ───────────
+  // ✅ SUPERADMIN global activity
   socket.on("joinActivityRoom", () => {
-    socket.join(`activity_room`);
-    console.log(`👥 ${socket.id} joined activity_room`);
+    socket.join("activity_room");
+    console.log(`👑 ${socket.id} joined activity_room (superadmin)`);
   });
 
   socket.on("leaveActivityRoom", () => {
-    socket.leave(`activity_room`);
-    console.log(`👥 ${socket.id} left activity_room`);
+    socket.leave("activity_room");
+    console.log(`👑 ${socket.id} left activity_room`);
   });
 
+  // ✅ COMPANY DASHBOARD activity
+  socket.on("joinCompanyActivity", (companyId) => {
+    if (!companyId) return;
+    socket.join(`activity_company_${companyId}`);
+    console.log(`🏢 ${socket.id} joined activity_company_${companyId}`);
+  });
+
+  socket.on("leaveCompanyActivity", (companyId) => {
+    if (!companyId) return;
+    socket.leave(`activity_company_${companyId}`);
+    console.log(`🏢 ${socket.id} left activity_company_${companyId}`);
+  });
+
+  // ✅ TOURNAMENT DASHBOARD activity (optional)
+  socket.on("joinTournamentActivity", (tournamentId) => {
+    if (!tournamentId) return;
+    socket.join(`activity_tournament_${tournamentId}`);
+    console.log(`🎯 ${socket.id} joined activity_tournament_${tournamentId}`);
+  });
+
+  socket.on("leaveTournamentActivity", (tournamentId) => {
+    if (!tournamentId) return;
+    socket.leave(`activity_tournament_${tournamentId}`);
+    console.log(`🎯 ${socket.id} left activity_tournament_${tournamentId}`);
+  });
+
+  // ─────────── 🔌 DISCONNECT ───────────
   socket.on("disconnect", () => {
     console.log("❌ Client disconnected:", socket.id);
   });
