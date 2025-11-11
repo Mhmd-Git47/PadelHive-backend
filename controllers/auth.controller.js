@@ -7,7 +7,7 @@ const { AppError } = require("../utils/errors");
 exports.registerAdm = async (req, res, next) => {
   try {
     const user = await authService.registerAdmin(req.body);
-    res.status(201).json({ message: "User registered", user });
+    res.status(201).json({ message: "User registered", user: user });
   } catch (err) {
     console.error("Register error:", err);
     next(err);
@@ -23,6 +23,7 @@ exports.loginAdm = async (req, res, next) => {
   }
 };
 // ----------------------------
+
 // Delete admin
 // ----------------------------
 exports.deleteAdminController = async (req, res, next) => {
@@ -415,7 +416,12 @@ exports.getUsersForSuperAdm = async (req, res, next) => {
 
 exports.getUserById = async (req, res, next) => {
   try {
-    const user = await authService.getUserById(req.params.id);
+    const currentUserId = req.user?.id;
+    const userId = req.params.id;
+    // if (currentUserId !== userId) {
+    //   throw new AppError("Invalid request.", 401);
+    // }
+    const user = await authService.getUserById(userId);
     res.json(user);
   } catch (err) {
     next(err);
@@ -733,6 +739,17 @@ exports.changePassword = async (req, res, next) => {
       success: true,
       message: result.message,
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.searchUsers = async (req, res, next) => {
+  try {
+    const query = req.query.query?.trim();
+    const users = await authService.searchUsers(query);
+
+    res.json(users);
   } catch (err) {
     next(err);
   }

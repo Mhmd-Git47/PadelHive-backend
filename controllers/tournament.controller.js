@@ -199,3 +199,14 @@ exports.checkUserRegisteredToTournament = async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 };
+
+exports.getFeaturedSponsorByTournamentId = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const featuredSponsor =
+      await tournamentService.getFeaturedSponsorByTournamentId(id);
+    res.status(200).json(featuredSponsor);
+  } catch (err) {
+    next(err);
+  }
+};

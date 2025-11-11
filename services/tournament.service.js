@@ -34,6 +34,7 @@ const createTournament = async (tournamentData, userId, userRole) => {
     private: isPrivate = false,
     poster_url,
     competition_type,
+    rules_json,
   } = tournamentData;
 
   const client = await pool.connect();
@@ -88,12 +89,13 @@ const createTournament = async (tournamentData, userId, userRole) => {
         max_allowed_elo_rate,
         state,
         competition_type,
-        location_id
+        location_id, 
+        rules_json
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8,
         $9, $10, $11, $12, $13, $14, $15,
         $16, $17, $18, $19, $20, $21, $22, $23, $24,
-        NOW(), NOW(), $25, $26, $27, $28
+        NOW(), NOW(), $25, $26, $27, $28, $29
       )
       RETURNING *;
     `,
@@ -126,6 +128,7 @@ const createTournament = async (tournamentData, userId, userRole) => {
         "pending",
         competition_type,
         location_id,
+        rules_json,
       ]
     );
 
@@ -299,6 +302,16 @@ const deleteTournament = async (id, userId, userRole) => {
   }
 };
 
+const getFeaturedSponsorByTournamentId = async (id) => {
+  const result = await pool.query(
+    `SELECT show_all_sponsors, featured_sponsor_id FROM tournaments WHERE id = $1`,
+    [id]
+  );
+
+  if (result.rows.length === 0) throw new AppError(`Tournament not found`, 401);
+  return result.rows[0];
+};
+
 // user_tournaments_history
 const getTournamentsByUserId = async (userId) => {
   const tournaments = await pool.query(
@@ -331,6 +344,7 @@ module.exports = {
   updateTournament,
   getAllTournaments,
   getTournamentById,
+  getFeaturedSponsorByTournamentId,
   getTournamentsByCompanyId,
   getTournamentsByLocationId,
   deleteTournament,

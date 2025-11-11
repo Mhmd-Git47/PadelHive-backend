@@ -60,7 +60,7 @@ router.get(
   authorizeRoles("superadmin"),
   authController.getUsersForSuperAdm
 );
-router.get("/user/:id", authController.getUserById);
+router.get("/user/:id", authenticateToken, authController.getUserById);
 router.get("/user/:id/view", authController.getUserViewById);
 router.put(
   "/user/:id",
@@ -139,6 +139,13 @@ router.put(
   authenticateToken,
   authorizeRoles("superadmin"),
   authController.updateAdminBySuperController
+);
+
+router.get(
+  "/search",
+  authenticateToken,
+  authorizeRoles("company_admin", "location_admin"),
+  authController.searchUsers
 );
 
 module.exports = router;

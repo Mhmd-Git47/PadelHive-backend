@@ -45,6 +45,13 @@ router.get("/:id", tournamentController.getTournamentById);
  */
 
 router.get(
+  "/:id/featured-sponsor",
+  authenticateToken,
+  authorizeRoles("company_admin", "location_admin"),
+  tournamentController.getFeaturedSponsorByTournamentId
+);
+
+router.get(
   "/company/:companyId",
   authenticateToken,
   authorizeRoles("company_admin"),

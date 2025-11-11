@@ -1,18 +1,19 @@
 const pool = require("../db");
+const { AppError } = require("../utils/errors");
 
 const createSponsor = async (sponsorData) => {
-  const { company_id, name, logo_url } = sponsorData;
+  const { company_id, name, logo_url, is_featured } = sponsorData;
   const result = await pool.query(
-    `INSERT INTO sponsors (company_id, name, logo_url)
-     VALUES ($1, $2, $3) RETURNING *`,
-    [company_id, name, logo_url]
+    `INSERT INTO sponsors (company_id, name, logo_url, is_featured)
+     VALUES ($1, $2, $3, $4) RETURNING *`,
+    [company_id, name, logo_url, is_featured]
   );
   return result.rows[0];
 };
 
 const updateSponsor = async (id, updateData) => {
   if (Object.keys(updateData).length === 0) {
-    throw new Error(`No fields provided to update`);
+    throw new AppError(`No fields provided to update`, 401);
   }
 
   const fields = [];
@@ -76,14 +77,54 @@ const removeSponsorFromTournament = async (tournamentId, sponsorId) => {
 };
 
 const getSponsorsByTournament = async (tournamentId) => {
-  const result = await pool.query(
-    `SELECT s.*
-     FROM sponsors s
-     JOIN tournament_sponsors ts ON ts.sponsor_id = s.id
-     WHERE ts.tournament_id = $1`,
+  // 1️⃣ Fetch tournament details
+  const tournamentRes = await pool.query(
+    `SELECT show_all_sponsors, company_id, featured_sponsor_id
+     FROM tournaments
+     WHERE id = $1`,
     [tournamentId]
   );
-  return result.rows;
+
+  const tournament = tournamentRes.rows[0];
+  if (!tournament) throw new Error("Tournament not found");
+
+  // 2️⃣ Get sponsors based on show_all_sponsors
+  let sponsors;
+  if (tournament.show_all_sponsors) {
+    const result = await pool.query(
+      `SELECT * FROM sponsors
+       WHERE company_id = $1
+       ORDER BY name ASC`,
+      [tournament.company_id]
+    );
+    sponsors = result.rows;
+  } else {
+    const result = await pool.query(
+      `SELECT s.*
+       FROM sponsors s
+       JOIN tournament_sponsors ts ON ts.sponsor_id = s.id
+       WHERE ts.tournament_id = $1
+       ORDER BY ts.display_order NULLS LAST, s.name ASC`,
+      [tournamentId]
+    );
+    sponsors = result.rows;
+  }
+
+  // 3️⃣ If there’s a featured sponsor → fetch it
+  let featuredSponsor = null;
+  if (tournament.featured_sponsor_id) {
+    const featuredRes = await pool.query(
+      `SELECT * FROM sponsors WHERE id = $1`,
+      [tournament.featured_sponsor_id]
+    );
+    featuredSponsor = featuredRes.rows[0] || null;
+  }
+
+  // 4️⃣ Return both
+  return {
+    featured: featuredSponsor,
+    sponsors,
+  };
 };
 
 const getSponsorsWithVisibilityByCompany = async (tournamentId, companyId) => {

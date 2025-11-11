@@ -24,7 +24,7 @@ exports.generateFinalStagePlaceholders = async (req, res) => {
   const { stageId, tournamentId } = req.body;
 
   try {
-    const placeholders = await stageServices.generateFinalStagePlaceholders(
+    const placeholders = await stageServices.generateFinalStage(
       stageId,
       tournamentId
     );

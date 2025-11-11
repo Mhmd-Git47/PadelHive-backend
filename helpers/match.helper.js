@@ -19,14 +19,18 @@ async function generateMatchesForStages(tournamentId, stageId, clientt) {
   const matchService = require("../services/match.service");
   const stageService = require("../services/stage.service");
 
-  // for generating matches for group stage
+  // 1️⃣ Generate group stage matches (round robin)
   await matchService.generateMatchesForGroupStage(
     tournamentId,
     stageId,
     clientt
   );
 
-  await stageService.generateFinalStagePlaceholders(tournamentId, clientt);
+  // 2️⃣ Once group stage is finished and confirmed -> compute seeds
+  // await stageService.computeAndApplySeeds(tournamentId, clientt);
+
+  // 3️⃣ Then generate final stage matches (single elimination)
+  await stageService.generateFinalStage(tournamentId, clientt);
 }
 
 // function getKFactor(roundName) {

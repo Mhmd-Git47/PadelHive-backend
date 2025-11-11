@@ -172,7 +172,7 @@ const createGroupsWithParticipants = async (
       // Log failure safely
       await createActivityLog({
         scope: "company",
-        company_id: tournament?.company_id || null,
+        company_id: tournament.company_id,
         actor_id: userId,
         actor_role: userRole,
         actor_name: actorDetails?.name || "Unknown",
@@ -419,7 +419,7 @@ const updateGroupParticipants = async (
 
       await createActivityLog({
         scope: "company",
-        company_id: tournament?.company_id || null,
+        company_id: tournament.company_id,
         actor_id: userId,
         actor_role: userRole,
         actor_name: actorDetails?.name || "Unknown",
@@ -537,7 +537,7 @@ const generateMatchesAfterGroupConfirmation = async (
 
       await createActivityLog({
         scope: "company",
-        company_id: tournament?.company_id || null,
+        company_id: tournament.company_id,
         actor_id: userId,
         actor_role: userRole,
         actor_name: actorDetails?.name || "Unknown",
@@ -791,7 +791,13 @@ async function getSortedGroupStandings(tournamentId) {
   return groupedStats;
 }
 
-const updateGroup = async (id, updatedData, clientt, userId, userRole) => {
+const updateGroup = async (
+  id,
+  updatedData,
+  clientt,
+  userId = null,
+  userRole = null
+) => {
   const client = clientt || (await pool.connect());
 
   if (Object.keys(updatedData).length === 0) {
@@ -827,18 +833,17 @@ const updateGroup = async (id, updatedData, clientt, userId, userRole) => {
 
     // ✅ Only log if scheduled_time was updated
     if ("scheduled_time" in updatedData) {
+      const tournamentRes = await client.query(
+        `SELECT id, company_id FROM tournaments WHERE id = $1`,
+        [updatedGroup.tournament_id]
+      );
+
+      if (tournamentRes.rowCount === 0) {
+        throw new AppError(`Tournament is not found`, 401);
+      }
+
+      const tournament = tournamentRes.rows[0];
       try {
-        const tournamentRes = await client.query(
-          `SELECT id, company_id FROM tournaments WHERE id = $1`,
-          [updatedGroup.tournament_id]
-        );
-
-        if (tournamentRes.rowCount === 0) {
-          throw new AppError(`Tournament is not found`, 401);
-        }
-
-        const tournament = tournamentRes.rows[0];
-
         const actor = await getActorDetails(userId, userRole);
 
         await createActivityLog(
@@ -903,14 +908,31 @@ const updateGroup = async (id, updatedData, clientt, userId, userRole) => {
     // 🔥 Optional: log failed update attempt
     try {
       const actor = await getActorDetails(userId, userRole);
+
+      // 🔹 Safely fetch tournament info
+      let tournament = null;
+      try {
+        const res = await pool.query(
+          `SELECT id, company_id FROM tournaments
+         WHERE id = (SELECT tournament_id FROM groups WHERE id = $1 LIMIT 1)`,
+          [id]
+        );
+        tournament = res.rows[0] || null;
+      } catch (fetchErr) {
+        console.warn("⚠️ Could not fetch tournament:", fetchErr);
+      }
+
+      // 🔹 Ensure valid integer entity_id
+      const safeEntityId = parseInt(id, 10);
+
       await createActivityLog({
         scope: "company",
-        company_id: null,
+        company_id: tournament?.company_id || null,
         actor_id: userId,
         actor_role: userRole,
         actor_name: actor?.name || "Unknown",
         action_type: "GROUP_UPDATE_FAILED",
-        entity_id: id,
+        entity_id: Number.isFinite(safeEntityId) ? safeEntityId : null,
         entity_type: "group",
         description: `Failed to update group ${id}: ${err.message}`,
         status: "Failed",

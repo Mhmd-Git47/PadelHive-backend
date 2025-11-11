@@ -29,7 +29,7 @@ const registerAdmin = async (
       locationId && locationId !== "null" ? locationId : null;
 
     const result = await pool.query(
-      "INSERT INTO admins (username, password, role, company_id, location_id) VALUES ($1, $2, $3, $4, $5) RETURNING username, role, company_id, location_id",
+      "INSERT INTO admins (username, password, role, company_id, location_id) VALUES ($1, $2, $3, $4, $5) RETURNING id, username, role, company_id, location_id",
       [username, hashed, role, normalizedCompanyId, normalizedLocationId]
     );
 
@@ -72,7 +72,7 @@ const loginAdmin = async ({ username, password }) => {
     username,
   ]);
   const user = result.rows[0];
-  if (!user) throw new AppError("Admin not found", 401);
+  if (!user) throw new AppError("Invalid credentials", 401);
 
   const match = await bcrypt.compare(password, user.password);
   if (!match) throw new AppError("Invalid credentials", 401);
@@ -86,7 +86,7 @@ const loginAdmin = async ({ username, password }) => {
       location_id: user.location_id || null,
     },
     process.env.JWT_SECRET || "SECRET_KEY",
-    { expiresIn: "2h" }
+    { expiresIn: "12h" }
   );
   return token;
 };
@@ -98,7 +98,7 @@ const updateAdminBySuper = async (id, newUsername, newPassword) => {
   ]);
 
   if (adminRes.rowCount === 0) {
-    throw new AppError("Admin not found", 404);
+    throw new AppError("Invalid credentials", 404);
   }
 
   // 2️⃣ Build dynamic query
@@ -998,7 +998,7 @@ const loginUser = async ({ identifier, password }) => {
   const token = jwt.sign(
     { id: user.id, role: "user" },
     process.env.JWT_SECRET,
-    { expiresIn: "4h" }
+    { expiresIn: "12h" }
   );
 
   return {
@@ -1177,7 +1177,7 @@ const getUsersForSuperAdm = async () => {
   return result.rows;
 };
 
-const getUserById = async (userId) => {
+const getUserById = async (userId, activeUserId) => {
   const result = await pool.query(
     `SELECT id, email, first_name, last_name, category, date_of_birth, gender, image_url, phone_number, nationality, address, created_at, updated_at, elo_rate, user_status, display_name, rank 
      FROM users
@@ -1185,11 +1185,17 @@ const getUserById = async (userId) => {
     [userId]
   );
 
+  const user = result.rows[0];
+
+  // if (userId !== activeUserId) {
+  //   throw new AppError("Invalid request", 401);
+  // }
+
   if (result.rows.length === 0) {
     throw new AppError("Invalid email or password", 404);
   }
 
-  return result.rows[0];
+  return user;
 };
 
 const getUserViewById = async (userId) => {
@@ -1748,6 +1754,18 @@ const changePassword = async (oldPassword, newPassword, userId) => {
   return { message: "Password updated successfully." };
 };
 
+const searchUsers = async (query) => {
+  if (!query || query.length < 2) return [];
+  const sql = `
+  SELECT id, display_name FROM users WHERE display_name ILIKE $1`;
+
+  const values = [`%${query}%`];
+
+  const result = await pool.query(sql, values);
+
+  return result.rows;
+};
+
 module.exports = {
   registerAdmin,
   loginAdmin,
@@ -1777,4 +1795,5 @@ module.exports = {
   changeDisplayName,
   changePhoneNumber,
   changePassword,
+  searchUsers,
 };

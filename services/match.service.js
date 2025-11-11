@@ -9,8 +9,9 @@ const {
   updatePlacementsToTournamentHistory,
 } = require("../helpers/tournament.helper");
 const { generateRoundRobin } = require("../helpers/roundRobin");
-const groupService = require("./group.service");
+// const groupService = require("./group.service");
 const stageService = require("./stage.service");
+const finalStageHelper = require("../helpers/finalStage.helper");
 const { AppError } = require("../utils/errors");
 const { getActorDetails, createActivityLog } = require("./activityLog.service");
 
@@ -77,6 +78,9 @@ const updateMatchDirect = async (id, updatedData) => {
 };
 
 const updateMatch = async (id, updatedData) => {
+  const groupService = require("./group.service");
+  const stageService = require("./stage.service");
+
   const client = await pool.connect();
 
   if (Object.keys(updatedData).length === 0) {
@@ -194,6 +198,8 @@ async function handleCompletedMatch(match, client) {
 
 // 3️⃣ Group stage logic
 async function handleGroupStage(match, client) {
+  const groupService = require("./group.service");
+
   const groupMatchesRes = await client.query(
     `SELECT * FROM matches WHERE group_id = $1 ORDER BY round, id`,
     [match.group_id]
@@ -208,9 +214,32 @@ async function handleGroupStage(match, client) {
     { state: "completed", completed_at: new Date() },
     client
   );
+  // ⬇️ Unified logic here
+  const { isStandard } = await finalStageHelper.getBracketTypeInfo(
+    match.tournament_id,
+    client
+  );
 
-  // Calculate group rankings & update stage participants
-  await processGroupRankings(match, groupMatches, client);
+  if (isStandard) {
+    // Calculate group rankings & update stage participants
+    await processGroupRankings(match, groupMatches, client);
+  } else {
+    // Check if all groups are completed
+    const groupsRes = await client.query(
+      `SELECT state FROM groups WHERE tournament_id = $1`,
+      [match.tournament_id]
+    );
+    const allGroupsCompleted = groupsRes.rows.every(
+      (g) => g.state === "completed"
+    );
+
+    if (allGroupsCompleted) {
+      console.log(
+        "🎯 All groups done — computing global seeds for dynamic bracket..."
+      );
+      await finalStageHelper.computeAndApplySeeds(match.tournament_id, client);
+    }
+  }
 }
 
 async function processGroupRankings(match, groupMatches, client) {
@@ -650,7 +679,7 @@ const deleteTournamentMatches = async (tournamentId, userId, userRole) => {
 
       await createActivityLog({
         scope: "company",
-        company_id: tournament?.company_id || null,
+        company_id: tournament.company_id,
         actor_id: userId,
         actor_role: userRole,
         actor_name: actorDetails?.name || "Unknown",
