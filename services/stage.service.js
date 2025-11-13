@@ -150,19 +150,66 @@ const updateStageParticipant = async (id, updateData) => {
 const saveKnockoutBracket = async (tournamentId, draft, clientt) => {
   const client = clientt || (await pool.connect());
 
+  // ──────────────────────────────────────────────
+  // Helpers (mirror frontend logic)
+  // ──────────────────────────────────────────────
+  const nextPowerOfTwo = (n) => (n <= 1 ? 1 : 1 << Math.ceil(Math.log2(n)));
+  const prevPowerOfTwo = (n) => (n <= 1 ? 1 : 1 << Math.floor(Math.log2(n)));
+
+  const getBracketConfig = (N) => {
+    const prevPow = prevPowerOfTwo(N);
+    const nextPow = nextPowerOfTwo(N);
+
+    if (N === prevPow) {
+      return { bracketSize: prevPow, usePlayIns: false, playInCount: 0 };
+    }
+
+    const diffPrev = N - prevPow;
+    const diffNext = nextPow - N;
+
+    if (diffPrev < diffNext) {
+      // e.g. 18 → 16-slot bracket + play-ins
+      return {
+        bracketSize: prevPow,
+        usePlayIns: true,
+        playInCount: diffPrev * 2,
+      };
+    }
+
+    // otherwise larger 2^k with byes
+    return { bracketSize: nextPow, usePlayIns: false, playInCount: 0 };
+  };
+
   try {
     await client.query("BEGIN");
 
-    // --- Get Final Stage ---
+    // ──────────────────────────────────────────────
+    // Final stage
+    // ──────────────────────────────────────────────
     const stages = await getStagesByTournamentId(tournamentId);
     const finalStage = stages.find((s) => s.name === "Final Stage");
-    if (!finalStage)
+    if (!finalStage) {
       throw new Error(
         `Final Stage not found for tournament ID ${tournamentId}`
       );
+    }
     const stageId = finalStage.id;
 
-    // --- Insert stage_participants for real participants ---
+    // total participants as sent from frontend draft
+    const N =
+      draft?.totalParticipants ||
+      draft?.rounds?.[0]?.matches?.reduce(
+        (acc, m) => acc + (m.player1 ? 1 : 0) + (m.player2 ? 1 : 0),
+        0
+      ) ||
+      0;
+    if (!N) throw new Error("Draft has no participants");
+
+    const { bracketSize, usePlayIns } = getBracketConfig(N);
+
+    // ──────────────────────────────────────────────
+    // stage_participants (idempotent)
+    // ──────────────────────────────────────────────
     const participantToStageId = {};
     for (const round of draft.rounds) {
       for (const match of round.matches) {
@@ -177,21 +224,26 @@ const saveKnockoutBracket = async (tournamentId, draft, clientt) => {
               [stageId, p.id]
             );
 
-            participantToStageId[p.id] =
-              res.rows[0]?.id ||
-              (
-                await client.query(
-                  `SELECT id FROM stage_participants WHERE stage_id = $1 AND participant_id = $2 LIMIT 1`,
-                  [stageId, p.id]
-                )
-              ).rows[0].id;
+            if (res.rows[0]?.id) {
+              participantToStageId[p.id] = res.rows[0].id;
+            } else {
+              const found = await client.query(
+                `SELECT id FROM stage_participants
+                 WHERE stage_id = $1 AND participant_id = $2
+                 LIMIT 1`,
+                [stageId, p.id]
+              );
+              participantToStageId[p.id] = found.rows[0].id;
+            }
           }
         }
       }
     }
 
-    // ---- Build matches round by round ----------
-    let prevRoundMatchIds = []; // IDs of previous round matches
+    // ──────────────────────────────────────────────
+    // Build matches round by round
+    // ──────────────────────────────────────────────
+    let prevRoundMatchIds = [];
 
     for (let r = 0; r < draft.rounds.length; r++) {
       const round = draft.rounds[r];
@@ -199,40 +251,66 @@ const saveKnockoutBracket = async (tournamentId, draft, clientt) => {
       const roundName = getRoundName(roundNumber, draft.rounds.length);
 
       const currentRoundMatchIds = [];
+      const prevCount = prevRoundMatchIds.length;
+      const currCount = round.matches.length;
 
-      for (let m = 0; m < round.matches.length; m++) {
+      const isFirstRound = prevCount === 0;
+      // When we are using play-ins:
+      // round index 0  → play-ins
+      // round index 1  → main bracket (fed by play-ins)
+      const isPlayInMainRound = usePlayIns && r === 1;
+
+      for (let m = 0; m < currCount; m++) {
         const match = round.matches[m];
 
-        let p1_stage = match.player1
+        let p1_stage = match.player1?.id
           ? participantToStageId[match.player1.id]
           : null;
-        let p2_stage = match.player2
+        let p2_stage = match.player2?.id
           ? participantToStageId[match.player2.id]
           : null;
+
         let p1_prereq = null;
         let p2_prereq = null;
 
-        if (r === 1) {
-          // ROUND 2: assign prereqs only for player2 if previous round exists
-          if (!match.player2 && prevRoundMatchIds[m] != null) {
-            p2_prereq = prevRoundMatchIds[m]; // winner of corresponding round 1 match
-            p2_stage = null;
+        if (isFirstRound) {
+          // No prereqs in first round; use stage ids as set in draft
+        } else if (isPlayInMainRound) {
+          // We are in the round *after* the play-ins.
+          // Front-end generatePlayInBracket builds it so:
+          //   - playIns are round[0]
+          //   - main bracket is round[1]
+          //   - for the first P matches: one side is a seed, the other is null (waiting for play-in winner)
+          //
+          // So: each previous match i feeds into current match i on the null side.
+          const sourceMatchId = prevRoundMatchIds[m];
+
+          if (sourceMatchId != null) {
+            if (!p1_stage) {
+              p1_prereq = sourceMatchId;
+            } else if (!p2_stage) {
+              p2_prereq = sourceMatchId;
+            }
           }
-          // player1 is the seed who had bye, keep as stage_player1_id
-        } else if (r > 1) {
-          // Later rounds: both sides may be winners of previous matches
-          const prevIndex = m * 2;
-          p1_prereq = prevRoundMatchIds[prevIndex] || null;
-          p2_prereq = prevRoundMatchIds[prevIndex + 1] || null;
-          p1_stage = null;
-          p2_stage = null;
+
+          if (p1_prereq) p1_stage = null;
+          if (p2_prereq) p2_stage = null;
+        } else {
+          // Normal knock-out progression (no play-ins in this step)
+          // Winners of two previous matches face each other.
+          const base = m * 2;
+          p1_prereq = prevRoundMatchIds[base] ?? null;
+          p2_prereq = prevRoundMatchIds[base + 1] ?? null;
+
+          if (p1_prereq) p1_stage = null;
+          if (p2_prereq) p2_stage = null;
         }
 
-        const identifier = `${match.player1?.name || "TBD"} vs ${
-          match.player2?.name || "TBD"
-        } (${roundName})`;
+        const leftName = match.player1?.name || "TBD";
+        const rightName = match.player2?.name || "TBD";
+        const identifier = `${leftName} vs ${rightName} (${roundName})`;
 
-        const res = await client.query(
+        const ins = await client.query(
           `INSERT INTO matches
              (stage_id, tournament_id,
               stage_player1_id, stage_player2_id,
@@ -253,13 +331,11 @@ const saveKnockoutBracket = async (tournamentId, draft, clientt) => {
           ]
         );
 
-        currentRoundMatchIds.push(res.rows[0].id);
+        currentRoundMatchIds.push(ins.rows[0].id);
       }
 
       prevRoundMatchIds = currentRoundMatchIds;
     }
-
-    // await finalStageHelper.computeAndApplySeeds(tournamentId);
 
     await client.query("COMMIT");
     console.log("✅ Knockout bracket saved successfully!");

@@ -93,7 +93,7 @@ const getSponsorsByTournament = async (tournamentId) => {
   if (tournament.show_all_sponsors) {
     const result = await pool.query(
       `SELECT * FROM sponsors
-       WHERE company_id = $1
+       WHERE company_id = $1 AND is_featured = false
        ORDER BY name ASC`,
       [tournament.company_id]
     );

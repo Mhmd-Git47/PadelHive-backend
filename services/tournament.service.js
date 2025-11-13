@@ -184,7 +184,6 @@ const createTournament = async (tournamentData, userId, userRole) => {
     client.release();
   }
 };
-
 const updateTournament = async (id, updateData) => {
   if (Object.keys(updateData).length === 0) {
     throw new AppError(`No fields provided to update`, 400);
@@ -195,15 +194,22 @@ const updateTournament = async (id, updateData) => {
   let idx = 1;
 
   for (const [key, value] of Object.entries(updateData)) {
+    // 🧩 Convert "null" string or undefined to real null
+    const finalValue =
+      value === "null" || value === "" || value === undefined ? null : value;
+
     fields.push(`${key} = $${idx}`);
-    values.push(value);
+    values.push(finalValue);
     idx++;
   }
 
   values.push(id);
 
   const query = `
-    UPDATE tournaments SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *;
+    UPDATE tournaments
+    SET ${fields.join(", ")}
+    WHERE id = $${idx}
+    RETURNING *;
   `;
 
   const result = await pool.query(query, values);
