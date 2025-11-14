@@ -31,8 +31,8 @@ const createParticipant = async (participantData, userId, userRole) => {
 
     const tournament = tournamentRes.rows[0];
 
-    // check if tournament registration is closed
-    if (!tournament.open_registration) {
+    // check if tournament registration is closed only for users
+    if (!tournament.open_registration && userRole === "user") {
       throw new AppError(`Cannot register: Registration is closed.`, 400);
     }
 
@@ -40,7 +40,7 @@ const createParticipant = async (participantData, userId, userRole) => {
     const usersElo = [
       participantData.padelhive_user1_elo,
       participantData.padelhive_user2_elo,
-    ].filter((e) => e != null); // ignore nulls
+    ].filter((e) => e != null); 
 
     if (tournament.max_allowed_elo_rate != null) {
       const invalidUsers = usersElo.filter(
