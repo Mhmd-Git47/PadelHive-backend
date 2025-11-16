@@ -243,6 +243,8 @@ async function handleGroupStage(match, client) {
 }
 
 async function processGroupRankings(match, groupMatches, client) {
+  const stageService = require("./stage.service");
+
   const participantStats = {};
 
   // Step 1️⃣ — Aggregate all stats
