@@ -202,7 +202,12 @@ exports.checkUserRegisteredToTournament = async (req, res) => {
 
 exports.getFeaturedSponsorByTournamentId = async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = Number(req.params.id);
+    // if (!id) {
+    //   return res
+    //     .status(400)
+    //     .json({ error: "Tournament ID is required and must be a number." });
+    // }
     const featuredSponsor =
       await tournamentService.getFeaturedSponsorByTournamentId(id);
     res.status(200).json(featuredSponsor);

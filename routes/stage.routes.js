@@ -2,6 +2,11 @@ const express = require("express");
 const router = express.Router();
 const stageController = require("../controllers/stage.controller");
 
+const {
+  authenticateToken,
+  authorizeRoles,
+} = require("../middleware/auth.middleware");
+
 router.get(
   "/tournament/:tournamentId",
   stageController.getStagesByTournamentId
@@ -21,7 +26,21 @@ router.post(
   stageController.saveKnockoutBracket
 );
 
+router.post(
+  "/:tournamentId/stages/:stageId/custom-bracket",
+  authenticateToken,
+  authorizeRoles("company_admin", "location_admin"),
+  stageController.generateCustomizationBracket
+);
+
 router.put("/stage-participant", stageController.updateStageParticipant);
+
+router.delete(
+  "/:tournamentId/final-stage/participants",
+  authenticateToken,
+  authorizeRoles("company_admin", "location_admin"),
+  stageController.removeFinalStageParticipants
+);
 
 module.exports = router;
 

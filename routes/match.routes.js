@@ -21,6 +21,12 @@ router.patch(
   authorizeRoles("superadmin", "company_admin", "location_admin"),
   matchesController.updateMatchDirect
 );
+router.patch(
+  "/:matchId/participants",
+  authenticateToken,
+  authorizeRoles("company_admin", "location_admin"),
+  matchesController.updateMatchParticipants
+);
 // router.get("/", matchesController.getAllMatchs);
 // router.get("/:id", matchesController.getMatchById);
 

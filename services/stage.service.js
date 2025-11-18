@@ -2,6 +2,7 @@ const pool = require("../db");
 const { getSortedGroupStandings } = require("./group.service");
 const tournamentService = require("./tournament.service");
 const finalStageHelper = require("../helpers/finalStage.helper");
+const { AppError } = require("../utils/errors");
 
 const createInitialStagesForTournament = async (
   client,
@@ -337,6 +338,15 @@ const saveKnockoutBracket = async (tournamentId, draft, clientt) => {
       prevRoundMatchIds = currentRoundMatchIds;
     }
 
+    const hasByes = draft.totalParticipants < draft.bracketSize;
+
+    if (hasByes) {
+      console.log("🔁 Auto-advancing BYEs...");
+      await finalStageHelper.autoAdvanceByeMatches(tournamentId, client);
+    } else {
+      console.log("ℹ️ No BYEs detected — skipping auto-advance.");
+    }
+
     await client.query("COMMIT");
     console.log("✅ Knockout bracket saved successfully!");
   } catch (err) {
@@ -368,6 +378,71 @@ const deleteStagesByTournamentId = async (tournamentId, client) => {
   }
 };
 
+// delete final stage participants
+const deleteParticipantsInFinalStage = async (tournamentId, stageId) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    let finalStageId = stageId;
+
+    if (!finalStageId) {
+      const stagesRes = await getStagesByTournamentId(tournamentId);
+      const stages = stagesRes.rows;
+
+      const finalStage = stages.find((s) => s.name === "Final Stage");
+
+      if (!finalStage) {
+        throw new AppError("Final Stage not found.", 404);
+      }
+
+      finalStageId = finalStage.id;
+    }
+
+    await client.query(
+      `UPDATE stage_participants SET participant_id = NULL WHERE stage_id = $1`,
+      [finalStageId]
+    );
+
+    await client.query("COMMIT");
+    return { success: true };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw new AppError(`Failed deleting participants in final stage.`, 400);
+  } finally {
+    client.release();
+  }
+};
+
+const generateCustomizationBracket = async (tournamentId, draft, stageId) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // 1st. Delete stage_participants rows related to this tournament
+    await client.query(`DELETE FROM stage_participants WHERE stage_id = $1`, [
+      stageId,
+    ]);
+
+    // 2nd. Delete Final stage matches in this tournament
+    await client.query(
+      `DELETE FROM matches WHERE tournament_id = $1 AND stage_id = $2`,
+      [tournamentId, stageId]
+    );
+
+    // 3rd. Generate bracket (same as knockout)
+    const matchIdMap = await saveKnockoutBracket(tournamentId, draft, client);
+
+    await client.query("COMMIT");
+    return matchIdMap;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw new AppError(err || "Failed to generate custom bracket.", 500);
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   createInitialStagesForTournament,
   getStagesByTournamentId,
@@ -377,4 +452,6 @@ module.exports = {
   updateStageParticipant,
   deleteStagesByTournamentId,
   saveKnockoutBracket,
+  deleteParticipantsInFinalStage,
+  generateCustomizationBracket,
 };

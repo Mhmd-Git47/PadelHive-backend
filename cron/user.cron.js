@@ -2,6 +2,7 @@ const cron = require("node-cron");
 const pool = require("../db");
 const path = require("path");
 const fs = require("fs");
+const dayjs = require("dayjs");
 
 const IMAGE_UPLOAD_PATH = path.join(__dirname, "..", "images/users");
 
@@ -41,3 +42,22 @@ cron.schedule(
   },
   { timezone: "Etc/UTC" }
 );
+
+// Activity Log Cleanup - Runs every day at midnight
+cron.schedule("0 0 * * *", async () => {
+  console.log("🧹 Running activity log cleanup job...");
+
+  try {
+    const twoWeeksAgo = dayjs().subtract(14, "day").toISOString();
+
+    const result = await pool.query(
+      `DELETE FROM activity_logs 
+       WHERE created_at < $1`,
+      [twoWeeksAgo]
+    );
+
+    console.log(`✅ Deleted ${result.rowCount} old activity log entries.`);
+  } catch (err) {
+    console.error("❌ Error deleting old activity logs:", err);
+  }
+});

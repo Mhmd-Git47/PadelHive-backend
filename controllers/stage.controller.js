@@ -95,3 +95,46 @@ exports.getStageParticipantsByStageId = async (req, res) => {
       .json({ error: "Server error while fetching stage participants." });
   }
 };
+
+exports.removeFinalStageParticipants = async (req, res, next) => {
+  try {
+    const { tournamentId } = req.params;
+    const { stageId } = req.body;
+
+    const result = await stageServices.deleteParticipantsInFinalStage(
+      tournamentId,
+      stageId
+    );
+
+    return res.status(200).json({
+      message: "Participants removed from final stage.",
+      result,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.generateCustomizationBracket = async (req, res, next) => {
+  try {
+    const { tournamentId } = req.params;
+    const { stageId } = req.params;
+    const { draft } = req.body;
+
+    if (!draft || !draft.rounds) {
+      return res.status(400).json({ error: "Invalid draft format" });
+    }
+
+    const matchIdMap = await stageServices.generateCustomizationBracket(
+      tournamentId,
+      draft,
+      stageId
+    );
+    return res.json({
+      message: "Knockout bracket saved successfully",
+      matchIdMap,
+    });
+  } catch (err) {
+    next(err);
+  }
+};

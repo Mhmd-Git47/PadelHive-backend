@@ -873,4 +873,5 @@ module.exports = {
   generateFinalStageSeedsPlaceholders,
   getBracketTypeInfo,
   computeAndApplySeeds,
+  autoAdvanceByeMatches,
 };

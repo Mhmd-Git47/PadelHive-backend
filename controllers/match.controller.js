@@ -139,3 +139,23 @@ exports.deleteTournamentMatches = async (req, res, next) => {
     next(error);
   }
 };
+
+exports.updateMatchParticipants = async (req, res, next) => {
+  try {
+    const { matchId } = req.params;
+    const { player1Id, player2Id } = req.body;
+
+    const result = await matchService.updateMatchParticipants(
+      matchId,
+      player1Id,
+      player2Id
+    );
+
+    return res.json({
+      message: `Match participants updated`,
+      result,
+    });
+  } catch (err) {
+    next(err);
+  }
+};

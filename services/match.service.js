@@ -704,6 +704,92 @@ const deleteTournamentMatches = async (tournamentId, userId, userRole) => {
   }
 };
 
+// update final stage match participant
+const updateMatchParticipants = async (matchId, player1Id, player2Id) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const matchRes = await client.query(
+      `SELECT stage_id, stage_player1_id, stage_player2_id
+       FROM matches WHERE id = $1`,
+      [matchId]
+    );
+
+    const stageId = matchRes.rows[0].stage_id;
+    const stagePlayer1Id = matchRes.rows[0].stage_player1_id;
+    const stagePlayer2Id = matchRes.rows[0].stage_player2_id;
+
+    // 1️⃣ Player 1
+    const p1Stage = await assignOrClearStageParticipant(
+      stageId,
+      player1Id,
+      stagePlayer1Id,
+      client
+    );
+
+    // 2️⃣ Player 2
+    const p2Stage = await assignOrClearStageParticipant(
+      stageId,
+      player2Id,
+      stagePlayer2Id,
+      client
+    );
+
+    // 3️⃣ Update match using existing stage_player ids
+    await client.query(
+      `UPDATE matches
+       SET stage_player1_id = $1,
+           stage_player2_id = $2,
+           updated_at = NOW()
+       WHERE id = $3`,
+      [p1Stage, p2Stage, matchId]
+    );
+
+    await client.query("COMMIT");
+
+    return { matchId, p1Stage, p2Stage };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// Ensure stage participant exists or update it
+async function assignOrClearStageParticipant(
+  stageId,
+  participantId,
+  existingStagePlayerId,
+  client
+) {
+  if (existingStagePlayerId) {
+    // ✔ If clearing -> set participant_id = NULL
+    // ✔ If assigning -> update to new ID
+    await client.query(
+      `UPDATE stage_participants 
+       SET participant_id = $1 
+       WHERE id = $2`,
+      [participantId, existingStagePlayerId]
+    );
+    return existingStagePlayerId;
+  }
+
+  // If there is no stage participant assigned yet
+  if (!participantId) return null; // no placeholder to create
+
+  // Create new stage participant row
+  const res = await client.query(
+    `INSERT INTO stage_participants (stage_id, participant_id)
+     VALUES ($1, $2)
+     RETURNING id`,
+    [stageId, participantId]
+  );
+
+  return res.rows[0].id;
+}
+
 module.exports = {
   getAllMatches,
   getMatchesByTournamentId,
@@ -715,4 +801,5 @@ module.exports = {
   generateMatchesForGroupStage,
   getMatchesByUserId,
   deleteTournamentMatches,
+  updateMatchParticipants,
 };
