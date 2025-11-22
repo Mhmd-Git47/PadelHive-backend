@@ -7,6 +7,12 @@ const {
 } = require("../middleware/auth.middleware");
 
 router.post("/", authenticateToken, participantController.createParticipant);
+router.put(
+  "/switch",
+  authenticateToken,
+  authorizeRoles("company_admin", "location_admin"),
+  participantController.switchParticipants
+);
 router.patch(
   "/:id",
   authenticateToken,

@@ -27,6 +27,12 @@ router.patch(
   authorizeRoles("company_admin", "location_admin"),
   matchesController.updateMatchParticipants
 );
+router.patch(
+  "/:matchId/reset",
+  authenticateToken,
+  authorizeRoles("company_admin", "location_admin"),
+  matchesController.resetMatchScores
+);
 // router.get("/", matchesController.getAllMatchs);
 // router.get("/:id", matchesController.getMatchById);
 

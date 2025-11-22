@@ -136,3 +136,26 @@ exports.checkParticipantName = async (req, res, next) => {
     next(err);
   }
 };
+
+exports.switchParticipants = async (req, res, next) => {
+  try {
+    const { tournamentId, p1Id, p2Id } = req.body;
+
+    if (!tournamentId || !p1Id || !p2Id) {
+      throw new AppError("Missing required fields", 400);
+    }
+
+    const result = await participantService.switchParticipantsInTournament(
+      p1Id,
+      p2Id,
+      tournamentId
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Participants switched successfully",
+    });
+  } catch (err) {
+    next(err);
+  }
+};

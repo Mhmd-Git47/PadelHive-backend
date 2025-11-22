@@ -105,6 +105,8 @@ const io = new Server(server, {
     origin: process.env.CORS_ORIGINS,
     methods: ["GET", "POST"],
   },
+  pingTimeout: 20000,
+  pingInterval: 12000,
 });
 
 global.io = io;

@@ -14,6 +14,16 @@ const { createActivityLog, getActorDetails } = require("./activityLog.service");
 const createParticipant = async (participantData, userId, userRole) => {
   const { tournament_id, name, comment } = participantData;
 
+  // ❌ Prevent same user registered twice in same team
+  if (
+    participantData.padelhive_user1_id === participantData.padelhive_user2_id
+  ) {
+    throw new AppError(
+      "Cannot register: Player 1 and Player 2 must be different users.",
+      400
+    );
+  }
+
   const client = await pool.connect();
 
   try {
@@ -40,7 +50,7 @@ const createParticipant = async (participantData, userId, userRole) => {
     const usersElo = [
       participantData.padelhive_user1_elo,
       participantData.padelhive_user2_elo,
-    ].filter((e) => e != null); 
+    ].filter((e) => e != null);
 
     if (tournament.max_allowed_elo_rate != null) {
       const invalidUsers = usersElo.filter(
@@ -55,23 +65,29 @@ const createParticipant = async (participantData, userId, userRole) => {
       }
     }
 
-    // 3️⃣ Check if user1 or user2 is already registered
-    const checkQuery = `
-      SELECT user_id
-      FROM user_tournaments_history
+    // 3️⃣ Check if user1 or user2 is already registered in participants table
+    const duplicateCheck = await client.query(
+      `
+      SELECT id, name 
+      FROM participants
       WHERE tournament_id = $1
-        AND user_id IN ($2, $3)
-    `;
+        AND (
+          padelhive_user1_id = $2 OR padelhive_user2_id = $2 OR
+          padelhive_user1_id = $3 OR padelhive_user2_id = $3
+        )
+      `,
+      [
+        tournament_id,
+        participantData.padelhive_user1_id,
+        participantData.padelhive_user2_id,
+      ]
+    );
 
-    const checkRes = await client.query(checkQuery, [
-      tournament_id,
-      participantData.padelhive_user1_id,
-      participantData.padelhive_user2_id,
-    ]);
-
-    if (checkRes.rows.length > 0) {
-      const registeredUsers = checkRes.rows.map((r) => r.user_id);
-      throw new AppError(`Cannot register: user(s) already registered.`, 400);
+    if (duplicateCheck.rows.length > 0) {
+      throw new AppError(
+        `Cannot register: one or both users are already registered in another team.`,
+        400
+      );
     }
 
     // Get location
@@ -220,9 +236,57 @@ const createParticipant = async (participantData, userId, userRole) => {
 
 const updateParticipant = async (id, updateData) => {
   if (Object.keys(updateData).length === 0) {
-    throw new AppError(`No Fields provided to update`, 400);
+    throw new AppError(`No fields provided to update`, 400);
   }
 
+  // 1️⃣ Fetch existing participant
+  const existingRes = await pool.query(
+    `SELECT * FROM participants WHERE id = $1`,
+    [id]
+  );
+
+  if (existingRes.rows.length === 0) {
+    throw new AppError(`Participant not found`, 404);
+  }
+
+  const existing = existingRes.rows[0];
+  const tournamentId = existing.tournament_id;
+
+  // Extract new users if included in update
+  const newUser1 = updateData.padelhive_user1_id ?? existing.padelhive_user1_id;
+  const newUser2 = updateData.padelhive_user2_id ?? existing.padelhive_user2_id;
+
+  // 2️⃣ Validate user1 & user2 are not same
+  if (newUser1 === newUser2) {
+    throw new AppError(`Both players cannot be the same user`, 400);
+  }
+
+  // 3️⃣ Check if either user is already registered in another team
+  const duplicateCheck = await pool.query(
+    `
+    SELECT id, name 
+    FROM participants
+    WHERE tournament_id = $1
+      AND id <> $2
+      AND (
+        padelhive_user1_id = $3 OR
+        padelhive_user2_id = $3 OR
+        padelhive_user1_id = $4 OR
+        padelhive_user2_id = $4
+      )
+    `,
+    [tournamentId, id, newUser1, newUser2]
+  );
+
+  if (duplicateCheck.rows.length > 0) {
+    const otherTeam = duplicateCheck.rows[0];
+    throw new AppError(
+      `Cannot update team: one of the selected players is already registered in another team ("${otherTeam.name}").`,
+      400
+    );
+  }
+
+  // 4️⃣ Build dynamic SQL update statement
   const fields = [];
   const values = [];
   let idx = 1;
@@ -238,12 +302,16 @@ const updateParticipant = async (id, updateData) => {
   values.push(id);
 
   const query = `
-    UPDATE participants SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *;
+    UPDATE participants 
+    SET ${fields.join(", ")} 
+    WHERE id = $${idx}
+    RETURNING *;
   `;
 
   const result = await pool.query(query, values);
   const updatedParticipant = result.rows[0];
 
+  // 5️⃣ Emit socket update
   if (global.io && updatedParticipant) {
     global.io
       .to(`tournament_${updatedParticipant.tournament_id}`)
@@ -599,6 +667,64 @@ const isParticipantNameValid = async (name, tournamentId) => {
   return Number(result.rows[0].count) === 0;
 };
 
+const switchParticipantsInTournament = async (p1Id, p2Id, tournamentId) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    if (p1Id === p2Id) {
+      throw new AppError("Cannot switch the same participant", 400);
+    }
+
+    // 1️⃣ Fetch both participants
+    const participant1Res = await client.query(
+      `SELECT id, name, padelhive_user1_id, padelhive_user2_id 
+       FROM participants 
+       WHERE id = $1 AND tournament_id = $2`,
+      [p1Id, tournamentId]
+    );
+
+    const participant2Res = await client.query(
+      `SELECT id, name, padelhive_user1_id, padelhive_user2_id 
+       FROM participants 
+       WHERE id = $1 AND tournament_id = $2`,
+      [p2Id, tournamentId]
+    );
+
+    if (participant1Res.rowCount === 0 || participant2Res.rowCount === 0) {
+      throw new AppError("Participant not found in this tournament", 404);
+    }
+
+    const p1 = participant1Res.rows[0];
+    const p2 = participant2Res.rows[0];
+
+    // 2️⃣ Swap fields using a temporary placeholder
+    await client.query(
+      `UPDATE participants 
+       SET name = $1, padelhive_user1_id = $2, padelhive_user2_id = $3
+       WHERE id = $4`,
+      [p2.name, p2.padelhive_user1_id, p2.padelhive_user2_id, p1.id]
+    );
+
+    await client.query(
+      `UPDATE participants 
+       SET name = $1, padelhive_user1_id = $2, padelhive_user2_id = $3
+       WHERE id = $4`,
+      [p1.name, p1.padelhive_user1_id, p1.padelhive_user2_id, p2.id]
+    );
+
+    await client.query("COMMIT");
+
+    return { success: true };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw new AppError("An error occurred while switching participants", 500);
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   createParticipant,
   getAllParticipants,
@@ -608,4 +734,5 @@ module.exports = {
   deleteParticipant,
   disqualifyParticipant,
   isParticipantNameValid,
+  switchParticipantsInTournament,
 };

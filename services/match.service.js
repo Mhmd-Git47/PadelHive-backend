@@ -790,6 +790,16 @@ async function assignOrClearStageParticipant(
   return res.rows[0].id;
 }
 
+// reset scores by admin
+const resetMatchScores = async (matchId) => {
+  const result = await pool.query(
+    `UPDATE matches SET scores_csv = null, state = $1, completed_at = null WHERE id = $2 RETURNING id`,
+    ["pending", matchId]
+  );
+
+  return result.rowCount === 1;
+};
+
 module.exports = {
   getAllMatches,
   getMatchesByTournamentId,
@@ -802,4 +812,5 @@ module.exports = {
   getMatchesByUserId,
   deleteTournamentMatches,
   updateMatchParticipants,
+  resetMatchScores,
 };

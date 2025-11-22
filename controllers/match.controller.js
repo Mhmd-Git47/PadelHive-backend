@@ -159,3 +159,24 @@ exports.updateMatchParticipants = async (req, res, next) => {
     next(err);
   }
 };
+
+exports.resetMatchScores = async (req, res, next) => {
+  try {
+    const { matchId } = req.params;
+
+    const result = await matchService.resetMatchScores(matchId);
+
+    if (result) {
+      return res.json({
+        success: true,
+        message: `Scores resetted successfully.`,
+      });
+    }
+    return res.json({
+      success: false,
+      message: `Failed resetting scores.`,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
