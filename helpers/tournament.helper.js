@@ -36,6 +36,12 @@ async function updatePlacementsForTournament(finalMatch, client) {
 
 async function getEloRateForTournament(tournament) {
   const category = tournament.category.trim();
+  if (
+    category.toLowerCase() === "ladies" ||
+    category.toLowerCase() === "mixed"
+  ) {
+    return 1400;
+  }
   const getEloFromCategory = (category) => {
     if (!category || category.length > 2) return null;
 
@@ -44,8 +50,6 @@ async function getEloRateForTournament(tournament) {
     const main = category[0]; // "A", "B", "C", "D"
 
     const modifier = category.slice(1); // "+", "-", or ""
-    console.log("main: ", main);
-    console.log("modifier: ", modifier);
 
     // Base Elo for main categories
     const baseEloMap = {

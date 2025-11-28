@@ -119,7 +119,7 @@ const createStageParticipant = async ({
   return result.rows[0];
 };
 
-const updateStageParticipant = async (id, updateData) => {
+const updateStageParticipant = async (id, updateData, tournamentId) => {
   if (Object.keys(updateData).length === 0) {
     throw new Error(`No Fields provided to update`);
   }
@@ -144,6 +144,16 @@ const updateStageParticipant = async (id, updateData) => {
   `;
 
   const result = await pool.query(query, values);
+
+  if (global.io && tournamentId) {
+    global.io
+      .to(`tournament_${tournamentId}`)
+      .emit("stage-participant-updated", {
+        tournamentId: tournamentId,
+        stageParticipant: result.rows[0],
+      });
+  }
+
   return result.rows[0];
 };
 

@@ -403,9 +403,13 @@ async function processGroupRankings(match, groupMatches, client) {
     );
 
     if (existing.rows.length === 0) {
-      await stageService.updateStageParticipant(spId, {
-        participant_id: qualifiedTeams[i].participant_id,
-      });
+      await stageService.updateStageParticipant(
+        spId,
+        {
+          participant_id: qualifiedTeams[i].participant_id,
+        },
+        match.tournament_id
+      );
     } else {
       console.log(
         `⚠️ Participant ${qualifiedTeams[i].participant_id} already in stage ${finalStageId}, skipping.`
