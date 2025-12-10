@@ -14,16 +14,6 @@ const { createActivityLog, getActorDetails } = require("./activityLog.service");
 const createParticipant = async (participantData, userId, userRole) => {
   const { tournament_id, name, comment } = participantData;
 
-  // ❌ Prevent same user registered twice in same team
-  if (
-    participantData.padelhive_user1_id === participantData.padelhive_user2_id
-  ) {
-    throw new AppError(
-      "Cannot register: Player 1 and Player 2 must be different users.",
-      400
-    );
-  }
-
   const client = await pool.connect();
 
   try {
@@ -46,6 +36,18 @@ const createParticipant = async (participantData, userId, userRole) => {
       throw new AppError(`Cannot register: Registration is closed.`, 400);
     }
 
+    // ❌ Prevent same user registered twice in same team (in tournament type double )
+    if (
+      participantData?.padelhive_user1_id ===
+        participantData?.padelhive_user2_id &&
+      tournament.tournament_format !== "americano_single"
+    ) {
+      throw new AppError(
+        "Cannot register: Player 1 and Player 2 must be different users.",
+        400
+      );
+    }
+
     // 2️⃣ Check if participant(s) Elo is within allowed range
     const usersElo = [
       participantData.padelhive_user1_elo,
@@ -65,29 +67,61 @@ const createParticipant = async (participantData, userId, userRole) => {
       }
     }
 
-    // 3️⃣ Check if user1 or user2 is already registered in participants table
-    const duplicateCheck = await client.query(
-      `
-      SELECT id, name 
-      FROM participants
-      WHERE tournament_id = $1
-        AND (
-          padelhive_user1_id = $2 OR padelhive_user2_id = $2 OR
-          padelhive_user1_id = $3 OR padelhive_user2_id = $3
-        )
-      `,
-      [
-        tournament_id,
-        participantData.padelhive_user1_id,
-        participantData.padelhive_user2_id,
-      ]
-    );
+    // ⭐ Americano Single: force single-player registration
+    if (tournament.tournament_format === "americano_single") {
+      if (!participantData.user_id) {
+        throw new AppError(
+          "A valid user_id is required for Americano registration.",
+          400
+        );
+      }
 
-    if (duplicateCheck.rows.length > 0) {
-      throw new AppError(
-        `Cannot register: one or both users are already registered in another team.`,
-        400
+      // Americano only accepts ONE player
+      participantData.padelhive_user1_id = participantData.user_id;
+      participantData.padelhive_user2_id = null;
+    }
+
+    // 3️⃣ Check if user1 or user2 is already registered in participants table
+    if (tournament.tournament_format === "americano_single") {
+      const duplicateSingle = await client.query(
+        `
+    SELECT id FROM participants
+    WHERE tournament_id = $1
+    AND (padelhive_user1_id = $2)
+    `,
+        [tournament_id, participantData.user_id]
       );
+
+      if (duplicateSingle.rows.length > 0) {
+        throw new AppError(
+          "You are already registered in this tournament.",
+          400
+        );
+      }
+    } else {
+      const duplicateCheck = await client.query(
+        `
+        SELECT id, name 
+        FROM participants
+        WHERE tournament_id = $1
+          AND (
+            padelhive_user1_id = $2 OR padelhive_user2_id = $2 OR
+            padelhive_user1_id = $3 OR padelhive_user2_id = $3
+          )
+        `,
+        [
+          tournament_id,
+          participantData.padelhive_user1_id,
+          participantData.padelhive_user2_id,
+        ]
+      );
+
+      if (duplicateCheck.rows.length > 0) {
+        throw new AppError(
+          `Cannot register: one or both users are already registered in another team.`,
+          400
+        );
+      }
     }
 
     // Get location
@@ -120,6 +154,7 @@ const createParticipant = async (participantData, userId, userRole) => {
     participantData.participant_id = participant.id;
 
     // 5️⃣ Add payment
+
     await paymentService.createPaymentParticipant(participantData, client);
 
     // 6️⃣ Add to user_tournaments_history
@@ -143,7 +178,7 @@ const createParticipant = async (participantData, userId, userRole) => {
       [participantCount, tournament_id]
     );
 
-    // 9. work with activity log
+    // 9️⃣ work with activity log
     const actor = await getActorDetails(userId, userRole);
 
     await createActivityLog(
@@ -534,17 +569,25 @@ const disqualifyParticipant = async (
 
 const deleteParticipant = async (participantId, userId, userRole) => {
   const client = await pool.connect();
+
+  // Variables that must exist also in catch
+  let participantRow = null;
+  let updatedTournament = null;
+  let actor = null;
+
   try {
     await client.query("BEGIN");
 
-    const participant = await client.query(
+    // Fetch participant
+    const participantRes = await client.query(
       `SELECT * FROM participants WHERE id = $1`,
       [participantId]
     );
 
-    if (!participant.rows[0]) throw new AppError("Participant not found", 404);
+    participantRow = participantRes.rows[0];
+    if (!participantRow) throw new AppError("Participant not found", 404);
 
-    // 1️⃣ Update history first
+    // 1️⃣ Update history
     await tournamentHelper.onDeleteParticipantUpdateTournamentHistory(
       participantId,
       client
@@ -553,27 +596,29 @@ const deleteParticipant = async (participantId, userId, userRole) => {
     // 2️⃣ Delete payment data
     await paymentService.deletePaymentParticipant(
       participantId,
-      participant.rows[0].tournament_id,
+      participantRow.tournament_id,
       client
     );
 
-    // 3️⃣ Delete participant row
+    // 3️⃣ Delete participant
     const res = await client.query(`DELETE FROM participants WHERE id = $1`, [
       participantId,
     ]);
 
-    // 4️⃣ Decrement participants_count in tournaments table
+    // 4️⃣ Decrement participants_count
     const tournamentRes = await client.query(
       `UPDATE tournaments 
-        SET participants_count = GREATEST(participants_count - 1, 0)
-        WHERE id = $1
-        RETURNING *`,
-      [participant.rows[0].tournament_id]
+         SET participants_count = GREATEST(participants_count - 1, 0)
+         WHERE id = $1
+         RETURNING *`,
+      [participantRow.tournament_id]
     );
 
-    const updatedTournament = tournamentRes.rows[0];
+    updatedTournament = tournamentRes.rows[0];
 
-    const actor = await getActorDetails(userId, userRole);
+    // Activity log
+    actor = await getActorDetails(userId, userRole);
+
     await createActivityLog(
       {
         scope: "company",
@@ -582,9 +627,9 @@ const deleteParticipant = async (participantId, userId, userRole) => {
         actor_role: userRole,
         actor_name: actor.name,
         action_type: "DELETE_PARTICIPANT",
-        entity_id: participant.rows[0].id,
+        entity_id: participantRow.id,
         entity_type: "participant",
-        description: `Participant "${participant.rows[0].name}" has been removed from tournament "${updatedTournament.name}".`,
+        description: `Participant "${participantRow.name}" has been removed from tournament "${updatedTournament.name}".`,
         status: "Success",
         tournament_id: updatedTournament.id,
       },
@@ -593,20 +638,22 @@ const deleteParticipant = async (participantId, userId, userRole) => {
 
     await client.query("COMMIT");
 
+    // SOCKET EVENTS
     if (global.io) {
       global.io
-        .to(`tournament_${participant.rows[0].tournament_id}`)
-        .emit("participant-deleted", participant.rows[0]);
+        .to(`tournament_${participantRow.tournament_id}`)
+        .emit("participant-deleted", participantRow);
 
       global.io
-        .to(`tournament_${participant.rows[0].tournament_id}`)
+        .to(`tournament_${participantRow.tournament_id}`)
         .emit("tournament-updated", updatedTournament);
     }
 
+    // SEND LEFT EMAILS
     const userIds = [
-      participant.rows[0].padelhive_user1_id,
-      participant.rows[0].padelhive_user2_id,
-      participant.rows[0].user_id,
+      participantRow.padelhive_user1_id,
+      participantRow.padelhive_user2_id,
+      participantRow.user_id,
     ].filter(Boolean);
 
     if (userIds.length > 0) {
@@ -614,8 +661,7 @@ const deleteParticipant = async (participantId, userId, userRole) => {
         `SELECT id, display_name, email FROM users WHERE id = ANY($1::uuid[])`,
         [userIds]
       );
-      const users = usersRes.rows;
-      for (const user of users) {
+      for (const user of usersRes.rows) {
         try {
           sendTournamentLeftEmail(user, updatedTournament);
         } catch (err) {
@@ -627,29 +673,35 @@ const deleteParticipant = async (participantId, userId, userRole) => {
     return res.rowCount > 0;
   } catch (err) {
     await client.query("ROLLBACK");
+
+    // SAFE FAILURE LOGGING
     try {
-      await createActivityLog({
-        scope: "company",
-        company_id: updatedTournament?.company_id || null,
-        actor_id: userId,
-        actor_role: userRole,
-        actor_name: actor?.name || "Unknown",
-        action_type: "DELETE_PARTICIPANT_FAILED",
-        entity_id: participant?.rows?.[0]?.id || null,
-        entity_type: "participant",
-        description: `Failed to remove participant "${
-          participant?.rows?.[0]?.name || "unknown"
-        }"${
-          updatedTournament
-            ? ` from tournament "${updatedTournament.name}"`
-            : ""
-        }.`,
-        status: "Failed",
-        tournament_id: updatedTournament?.id || null,
-      });
+      await createActivityLog(
+        {
+          scope: "company",
+          company_id: updatedTournament?.company_id || null,
+          actor_id: userId,
+          actor_role: userRole,
+          actor_name: actor?.name || "Unknown",
+          action_type: "DELETE_PARTICIPANT_FAILED",
+          entity_id: participantRow?.id || null,
+          entity_type: "participant",
+          description: `Failed to remove participant "${
+            participantRow?.name || "unknown"
+          }"${
+            updatedTournament
+              ? ` from tournament "${updatedTournament.name}"`
+              : ""
+          }.`,
+          status: "Failed",
+          tournament_id: updatedTournament?.id || null,
+        },
+        client
+      );
     } catch (logErr) {
       console.error("⚠️ Failed to log participant delete error:", logErr);
     }
+
     throw err;
   } finally {
     client.release();

@@ -35,6 +35,7 @@ const createTournament = async (tournamentData, userId, userRole) => {
     poster_url,
     competition_type,
     rules_json,
+    courts_count = null,
   } = tournamentData;
 
   const client = await pool.connect();
@@ -90,12 +91,13 @@ const createTournament = async (tournamentData, userId, userRole) => {
         state,
         competition_type,
         location_id, 
-        rules_json
+        rules_json,
+        courts_count
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8,
         $9, $10, $11, $12, $13, $14, $15,
         $16, $17, $18, $19, $20, $21, $22, $23, $24,
-        NOW(), NOW(), $25, $26, $27, $28, $29
+        NOW(), NOW(), $25, $26, $27, $28, $29, $30
       )
       RETURNING *;
     `,
@@ -129,6 +131,7 @@ const createTournament = async (tournamentData, userId, userRole) => {
         competition_type,
         location_id,
         rules_json,
+        courts_count,
       ]
     );
 

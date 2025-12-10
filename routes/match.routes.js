@@ -42,6 +42,12 @@ router.post(
   authorizeRoles("superadmin", "company_admin", "location_admin"),
   matchesController.generateMatchesForGroupStage
 );
+router.post(
+  "/generate-single-americano-matches",
+  // authenticateToken,
+  // authorizeRoles("company_admin", "location_admin"),
+  matchesController.generateMatchesForSingleAmericanoStage
+);
 router.get("/stage/:stageId", matchesController.getMatchByStageId);
 router.get("/", matchesController.getMatchesByTournamentId);
 router.get("/user/:userId", matchesController.getMatchesByUserId);
@@ -53,6 +59,14 @@ router.delete(
   authenticateToken,
   authorizeRoles("company_admin", "location_admin"),
   matchesController.deleteTournamentMatches
+);
+
+// =============================
+// AMERICANO LEADERBOARD ROUTE
+// =============================
+router.get(
+  "/tournaments/:tournamentId/leaderboard",
+  matchesController.getAmericanoLeaderboard
 );
 
 module.exports = router;

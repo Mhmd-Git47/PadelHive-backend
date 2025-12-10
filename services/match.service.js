@@ -14,6 +14,7 @@ const stageService = require("./stage.service");
 const finalStageHelper = require("../helpers/finalStage.helper");
 const { AppError } = require("../utils/errors");
 const { getActorDetails, createActivityLog } = require("./activityLog.service");
+const americanoHelper = require(`../helpers/americano.helper`);
 
 const getAllMatches = async () => {
   const matches = await pool.query(`SELECT * FROM matches ORDER BY id`);
@@ -92,11 +93,18 @@ const updateMatch = async (id, updatedData) => {
 
     // 1️⃣ Update match
     const updatedMatch = await updateMatchRow(id, updatedData, client);
-
     // 2️⃣ Handle completed match logic
     if (updatedMatch.state === "completed" && updatedMatch.winner_id) {
       await handleCompletedMatch(updatedMatch, client);
     }
+
+    // 🔴 Fetch tournament
+    const tournamentRes = await client.query(
+      `SELECT id, tournament_format FROM tournaments WHERE id = $1 `,
+      [updatedMatch.tournament_id]
+    );
+
+    const tournament = tournamentRes.rows[0];
 
     // 3️⃣ Handle group stage
     if (updatedMatch.group_id !== null) {
@@ -112,6 +120,8 @@ const updateMatch = async (id, updatedData) => {
       //       standings: groupStandings,
       //     });
       // }
+    } else if (tournament.tournament_format === "americano_single") {
+      await handleAmericanoStage(updatedMatch, client);
     } else {
       // 4️⃣ Handle final stage / knockout
       await handleFinalStage(updatedMatch, client);
@@ -139,6 +149,19 @@ const updateMatch = async (id, updatedData) => {
             tournamentId: updatedMatch.tournament_id,
             standings: newStandings,
           });
+        if (tournament.tournament_format === "americano_single") {
+          // emit changes to leaderboard
+          const leaderboard = await getAmericanoLeaderboard(
+            updatedMatch.tournament_id
+          );
+          console.log("EMITTING AMERICANO EVENT", updatedMatch.tournament_id);
+          global.io
+            .to(`tournament_${updatedMatch.tournament_id}`)
+            .emit("americano-leaderboard-updated", {
+              tournamentId: updatedMatch.tournament_id,
+              leaderboard,
+            });
+        }
       } catch (err) {
         console.error("Error recalculating group standings: ", err);
       }
@@ -418,6 +441,52 @@ async function processGroupRankings(match, groupMatches, client) {
   }
 }
 
+async function handleAmericanoStage(match, client) {
+  const matchesRes = await client.query(
+    `SELECT id, state FROM matches WHERE stage_id = $1`,
+    [match.stage_id]
+  );
+
+  const matches = matchesRes.rows;
+
+  const allMatchesCompleted = matches.every((m) => m.state === "completed");
+
+  if (allMatchesCompleted) {
+    await client.query(`UPDATE stages SET state = 'completed' WHERE id = $1`, [
+      match.stage_id,
+    ]);
+  }
+
+  // 5️⃣ Check if all stages in tournament are completed
+  const tournamentStagesRes = await client.query(
+    `SELECT * FROM stages WHERE tournament_id = $1`,
+    [match.tournament_id]
+  );
+
+  const allTournamentCompleted = tournamentStagesRes.rows.every(
+    (s) => s.state === "completed"
+  );
+
+  if (!allTournamentCompleted) return;
+
+  // 6️⃣ Mark tournament completed
+  await client.query(
+    `UPDATE tournaments SET state = 'completed', completed_at = NOW() WHERE id = $1`,
+    [match.tournament_id]
+  );
+
+  // 7️⃣ Update user_tournaments_history for all participants (registered users)
+  await client.query(
+    `UPDATE user_tournaments_history
+     SET status = 'completed',
+         completed_at = NOW(),
+         updated_at = NOW()
+     WHERE tournament_id = $1
+       AND status = 'registered'`,
+    [match.tournament_id]
+  );
+}
+
 // 4️⃣ Final stage / knockout
 async function handleFinalStage(match, client) {
   // 1️⃣ Handle next match based on prereq
@@ -592,9 +661,11 @@ const deleteTournamentMatches = async (tournamentId, userId, userRole) => {
   try {
     await client.query("BEGIN");
 
-    // 1️⃣ Fetch tournament info for validation + logging
+    // Fetch tournament
     const tournamentRes = await client.query(
-      `SELECT id, name, company_id FROM tournaments WHERE id = $1`,
+      `SELECT id, name, company_id, tournament_format 
+       FROM tournaments 
+       WHERE id = $1`,
       [tournamentId]
     );
 
@@ -605,108 +676,157 @@ const deleteTournamentMatches = async (tournamentId, userId, userRole) => {
     const tournament = tournamentRes.rows[0];
     const actor = await getActorDetails(userId, userRole);
 
-    // 2️⃣ Get Final Stage ID
-    const finalStageRes = await client.query(
-      `SELECT id FROM stages WHERE tournament_id = $1 AND name = $2`,
-      [tournamentId, "Final Stage"]
-    );
+    let result;
 
-    const finalStageId = finalStageRes.rows?.[0]?.id;
-
-    if (!finalStageId) {
-      throw new AppError("Final Stage not found.", 421);
+    if (tournament.tournament_format === "americano_single") {
+      result = await deleteAmericanoMatches(
+        tournament,
+        actor,
+        client,
+        userRole,
+        userId
+      );
+    } else {
+      result = await deleteStandardTournamentMatches(
+        tournament,
+        actor,
+        client,
+        userRole,
+        userId
+      );
     }
 
-    // 3️⃣ Delete stage participants (for fresh matches)
-    await client.query(`DELETE FROM stage_participants WHERE stage_id = $1`, [
-      finalStageId,
-    ]);
-
-    // 4️⃣ Delete matches for the tournament
-    const deleteRes = await client.query(
-      `DELETE FROM matches WHERE tournament_id = $1 RETURNING id`,
-      [tournamentId]
-    );
-
-    const deletedCount = deleteRes.rowCount;
-
-    // 5️⃣ Commit transaction
     await client.query("COMMIT");
 
-    // 🟢 6️⃣ Log success
-    try {
-      await createActivityLog(
-        {
-          scope: "company",
-          company_id: tournament.company_id,
-          actor_id: userId,
-          actor_role: userRole,
-          actor_name: actor.name,
-          action_type: "DELETE_TOURNAMENT_MATCHES",
-          entity_id: null,
-          entity_type: "match",
-          description: `${deletedCount} match(es) deleted from tournament "${tournament.name}" (Final Stage ID: ${finalStageId}) by ${actor.name}.`,
-          status: "Success",
-          tournament_id: tournamentId,
-        },
-        client
-      );
-    } catch (logErr) {
-      console.error("⚠️ Failed to log match deletion success:", logErr);
-    }
-
-    // 🔔 Optional: Emit socket event
+    // Emit socket event
     if (global.io) {
       global.io.to(`tournament_${tournamentId}`).emit("matches-deleted", {
         tournamentId,
-        message: "All matches were deleted successfully.",
+        message: result.message,
       });
     }
 
-    return { message: `${deletedCount} matches deleted successfully.` };
+    return result;
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("❌ Error deleting tournament matches:", err);
-
-    // 🔴 Log failure
-    try {
-      let actorDetails = null;
-      try {
-        actorDetails = await getActorDetails(userId, userRole);
-      } catch (actorErr) {
-        console.warn("⚠️ Could not fetch actor details:", actorErr);
-      }
-
-      const tournamentRes = await pool.query(
-        `SELECT id, name, company_id FROM tournaments WHERE id = $1`,
-        [tournamentId]
-      );
-      const tournament = tournamentRes.rows[0];
-
-      await createActivityLog({
-        scope: "company",
-        company_id: tournament.company_id,
-        actor_id: userId,
-        actor_role: userRole,
-        actor_name: actorDetails?.name || "Unknown",
-        action_type: "DELETE_TOURNAMENT_MATCHES_FAILED",
-        entity_id: null,
-        entity_type: "match",
-        description: `Failed to delete matches for tournament "${
-          tournament?.name || tournamentId
-        }". Error: ${err.message}`,
-        status: "Failed",
-        tournament_id: tournamentId,
-      });
-    } catch (logErr) {
-      console.error("⚠️ Failed to log match deletion failure:", logErr);
-    }
-
     throw new AppError("Failed removing matches", 400);
   } finally {
     client.release();
   }
 };
+
+async function deleteAmericanoMatches(
+  tournament,
+  actor,
+  client,
+  userRole,
+  userId
+) {
+  // Find Americano stage
+  const stageRes = await client.query(
+    `SELECT id FROM stages 
+     WHERE tournament_id = $1 
+       AND type = 'americano'`,
+    [tournament.id]
+  );
+
+  if (stageRes.rowCount === 0) {
+    return { message: "No Americano matches to delete." };
+  }
+
+  const stageId = stageRes.rows[0].id;
+
+  // Delete matches
+  const matchDeleteRes = await client.query(
+    `DELETE FROM matches WHERE stage_id = $1 RETURNING id`,
+    [stageId]
+  );
+
+  // Delete stage participants
+  await client.query(`DELETE FROM stage_participants WHERE stage_id = $1`, [
+    stageId,
+  ]);
+
+  const deletedCount = matchDeleteRes.rowCount;
+
+  // Log
+  await createActivityLog(
+    {
+      scope: "company",
+      company_id: tournament.company_id,
+      actor_id: userId,
+      actor_role: userRole,
+      actor_name: actor.name,
+      action_type: "DELETE_AMERICANO_MATCHES",
+      entity_id: null,
+      entity_type: "match",
+      description: `Deleted ${deletedCount} Americano match(es) for "${tournament.name}".`,
+      status: "Success",
+      tournament_id: tournament.id,
+    },
+    client
+  );
+
+  return {
+    message: `${deletedCount} Americano matches deleted successfully.`,
+  };
+}
+
+async function deleteStandardTournamentMatches(
+  tournament,
+  actor,
+  client,
+  userRole,
+  userId
+) {
+  // Find final stage
+  const finalStageRes = await client.query(
+    `SELECT id FROM stages WHERE tournament_id = $1 AND name = 'Final Stage'`,
+    [tournament.id]
+  );
+
+  if (finalStageRes.rowCount === 0) {
+    throw new AppError("Final Stage not found.", 421);
+  }
+
+  const finalStageId = finalStageRes.rows[0].id;
+
+  // Delete stage participants
+  await client.query(`DELETE FROM stage_participants WHERE stage_id = $1`, [
+    finalStageId,
+  ]);
+
+  // Delete matches
+  const deleteRes = await client.query(
+    `DELETE FROM matches WHERE tournament_id = $1 RETURNING id`,
+    [tournament.id]
+  );
+
+  const deletedCount = deleteRes.rowCount;
+
+  // Log
+  await createActivityLog(
+    {
+      scope: "company",
+      company_id: tournament.company_id,
+      actor_id: userId,
+      actor_role: userRole,
+      actor_name: actor.name,
+      action_type: "DELETE_TOURNAMENT_MATCHES",
+      entity_id: null,
+      entity_type: "match",
+      description: `${deletedCount} matches deleted from tournament "${tournament.name}".`,
+      status: "Success",
+      tournament_id: tournament.id,
+    },
+    client
+  );
+
+  return {
+    message: `${deletedCount} matches deleted successfully.`,
+  };
+}
 
 // update final stage match participant
 const updateMatchParticipants = async (matchId, player1Id, player2Id) => {
@@ -804,6 +924,107 @@ const resetMatchScores = async (matchId) => {
   return result.rowCount === 1;
 };
 
+// 🔴 AMERICANO (INDIVIDUAL) GENERATION
+const generateMatchesForSingleAmericanoStage = async (tournamentId) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const tournamentRes = await client.query(
+      `SELECT id, tournament_format, courts_count
+       FROM tournaments WHERE id = $1`,
+      [tournamentId]
+    );
+
+    if (tournamentRes.rowCount === 0) {
+      throw new AppError("Tournament not found.", 400);
+    }
+
+    const tournament = tournamentRes.rows[0];
+
+    if (tournament.tournament_format !== "americano_single") {
+      throw new AppError(
+        "Tournament is not set to Americano(Individual).",
+        400
+      );
+    }
+
+    const existingMatches = await client.query(
+      `SELECT 1 FROM matches WHERE tournament_id = $1 LIMIT 1`,
+      [tournamentId]
+    );
+    if (existingMatches.rowCount > 0) {
+      throw new AppError("Matches already exist for this tournament.", 400);
+    }
+
+    const stageRes = await client.query(
+      `SELECT id FROM stages WHERE tournament_id = $1`,
+      [tournamentId]
+    );
+    const stage = stageRes.rows[0];
+
+    const participantsRes = await client.query(
+      `SELECT id FROM participants WHERE tournament_id = $1`,
+      [tournamentId]
+    );
+    if (participantsRes.rowCount < 4) {
+      throw new AppError("Not enough participants yet!", 401);
+    }
+
+    const participants = participantsRes.rows;
+
+    const createdMatches = await americanoHelper.generateAmericanoStageMatches({
+      tournamentId,
+      stageId: stage.id,
+      participants,
+      courtsCount: tournament.courts_count,
+      client,
+    });
+
+    await client.query("COMMIT");
+    return createdMatches;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+function isPerfectAmericano(pLength) {
+  return (pLength * (pLength - 1)) % 4 === 0;
+}
+
+const getAmericanoLeaderboard = async (tournamentId) => {
+  const client = await pool.connect();
+
+  try {
+    // 1️⃣ Get Americano stage
+    const stageRes = await client.query(
+      `SELECT id FROM stages WHERE tournament_id = $1 AND type = 'americano'`,
+      [tournamentId]
+    );
+
+    if (stageRes.rowCount === 0) {
+      return [];
+    }
+
+    const stageId = stageRes.rows[0].id;
+
+    return await americanoHelper.calculateAmericanoLeaderboard(
+      tournamentId,
+      stageId,
+      client
+    );
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getAllMatches,
   getMatchesByTournamentId,
@@ -817,4 +1038,6 @@ module.exports = {
   deleteTournamentMatches,
   updateMatchParticipants,
   resetMatchScores,
+  generateMatchesForSingleAmericanoStage,
+  getAmericanoLeaderboard,
 };

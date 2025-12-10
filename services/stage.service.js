@@ -29,6 +29,13 @@ const createInitialStagesForTournament = async (
         `,
       [tournamentId]
     );
+  } else if (tournamentFormat === "americano_single") {
+    await client.query(
+      `INSERT INTO stages (tournament_id, name, type, order_index, is_current, created_at)
+            VALUES ($1, 'Americano Stage', 'americano', 0, true, NOW());
+        `,
+      [tournamentId]
+    );
   }
 };
 

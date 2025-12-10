@@ -180,3 +180,35 @@ exports.resetMatchScores = async (req, res, next) => {
     next(err);
   }
 };
+
+exports.generateMatchesForSingleAmericanoStage = async (req, res, next) => {
+  try {
+    const { tournamentId } = req.body;
+    console.log(tournamentId);
+    const result = await matchService.generateMatchesForSingleAmericanoStage(
+      tournamentId
+    );
+
+    return res.status(201).json({ success: true, matches: result });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.getAmericanoLeaderboard = async (req, res, next) => {
+  const { tournamentId } = req.params;
+
+  try {
+    const leaderboard = await matchService.getAmericanoLeaderboard(
+      tournamentId
+    );
+
+    return res.status(200).json({
+      success: true,
+      tournamentId,
+      leaderboard,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
