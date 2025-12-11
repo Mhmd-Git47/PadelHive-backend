@@ -35,14 +35,18 @@ const createTournament = async (tournamentData, userId, userRole) => {
     poster_url,
     competition_type,
     rules_json,
-    courts_count = null,
+    courts_count = 0,
   } = tournamentData;
 
   const client = await pool.connect();
 
   // Helper to safely convert values to integers or null
-  const toInt = (val) => (val != null ? Number(val) : null);
-
+  const toInt = (val) => {
+    if (val === null || val === undefined || val === "null" || val === "") {
+      return null;
+    }
+    return Number(val);
+  };
   if (
     competition_type !== "friendly" &&
     competition_type !== "competitive" &&
@@ -131,7 +135,7 @@ const createTournament = async (tournamentData, userId, userRole) => {
         competition_type,
         location_id,
         rules_json,
-        courts_count,
+        toInt(courts_count),
       ]
     );
 
