@@ -974,13 +974,31 @@ const generateMatchesForSingleAmericanoStage = async (tournamentId) => {
 
     const participants = participantsRes.rows;
 
-    const createdMatches = await americanoHelper.generateAmericanoStageMatches({
-      tournamentId,
-      stageId: stage.id,
-      participants,
-      courtsCount: tournament.courts_count,
-      client,
-    });
+    // const createdMatches = await americanoHelper.generateAmericanoStageMatches({
+    //   tournamentId,
+    //   stageId: stage.id,
+    //   participants,
+    //   courtsCount: tournament.courts_count,
+    //   client,
+    // });
+
+    const isPerfect = isPerfectAmericano(participants.length);
+
+    const createdMatches = isPerfect
+      ? await americanoHelper.generatePerfectAmericanoStageMatches({
+          tournamentId,
+          stageId: stage.id,
+          participants,
+          courtsCount: tournament.courts_count,
+          client,
+        })
+      : await americanoHelper.generateBalancedAmericanoStageMatches({
+          tournamentId,
+          stageId: stage.id,
+          participants,
+          courtsCount: tournament.courts_count,
+          client,
+        });
 
     await client.query("COMMIT");
     return createdMatches;

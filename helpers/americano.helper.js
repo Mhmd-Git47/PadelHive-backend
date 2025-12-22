@@ -1,11 +1,9 @@
 // ============================================================================
-// AMERICANO HELPER – Unified Americano Scheduling Engine
-//  - Works for any N and any courtsCount
-//  - Builds rounds incrementally (like americano-padel.com style generators)
-//  - Tries to:
-//      * fill all courts each round
-//      * balance games per player
-//      * minimise partner/opponent repetitions
+// AMERICANO HELPER – Scheduling + Leaderboard
+//  - Perfect Americano (when possible): deterministic round-robin pairing,
+//    then convert pairs into americano matches (2 pairs -> 1 match),
+//    and if courtsCount < N/4, split each perfect round into sub-rounds.
+//  - Balanced Americano (fallback): heuristic minimising repetition.
 // ============================================================================
 
 // ---------- UTILITIES -------------------------------------------------------
@@ -17,6 +15,12 @@ function shuffle(arr) {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+// For "perfect Americano" feasibility.
+// This is your rule, kept as-is, but we also require N even and N>=4.
+function isPerfectAmericano(n) {
+  return n >= 4 && n % 2 === 0 && (n * (n - 1)) % 4 === 0;
 }
 
 // Score a potential match (two teams of 2) given current stats.
@@ -81,7 +85,6 @@ function chooseBestTeams(players, partnerCount, opponentCount, gamesPlayed) {
 function applyMatchStats(match, partnerCount, opponentCount, gamesPlayed) {
   const players = [...match.teams.A, ...match.teams.B];
 
-  // gamesPlayed
   for (const p of players) {
     gamesPlayed[p] = (gamesPlayed[p] || 0) + 1;
   }
@@ -124,32 +127,144 @@ function applyMatchStats(match, partnerCount, opponentCount, gamesPlayed) {
 }
 
 // ============================================================================
-// CORE SCHEDULER – used for all Americano cases
+// PERFECT AMERICANO (FIXED)
+// - Build (N-1) round-robin rounds of PAIRS using circle method.
+// - Convert PAIRS into americano matches: (pair0 vs pair1), (pair2 vs pair3), ...
+// - If courtsCount < matchesPerRound (N/4), split into sub-rounds (chunking).
 // ============================================================================
 
+// -------------------- PACKING HELPERS --------------------
+
+function matchPlayers(match) {
+  return [...match.teams.A, ...match.teams.B];
+}
+
+function hasConflict(round, match) {
+  const players = matchPlayers(match);
+  for (const m of round) {
+    const used = matchPlayers(m);
+    // any overlap => conflict
+    if (players.some((p) => used.includes(p))) return true;
+  }
+  return false;
+}
+
 /**
- * Build an Americano schedule for arbitrary N and courtsCount.
- * Returns array of rounds; each round is array of matches:
- *   match = { teams: { A: [p1, p2], B: [p3, p4] } }
- *
- * Key properties:
- *  - Uses up to `courtsCount` matches per round.
- *  - No player appears twice in the same round.
- *  - Tries to balance games per player.
- *  - Tries to minimise partner/opponent repetition.
+ * Global packer:
+ * - tries to pack each match into the earliest round it fits (first-fit)
+ * - guarantees: no player repeats within a round, and max courtsCount per round
  */
-function buildAmericanoRounds(participants, courtsCount) {
+function packMatchesIntoRounds(matches, courtsCount) {
+  const rounds = [];
+
+  for (const match of matches) {
+    let placed = false;
+
+    for (const round of rounds) {
+      if (round.length >= courtsCount) continue;
+      if (hasConflict(round, match)) continue;
+
+      round.push(match);
+      placed = true;
+      break;
+    }
+
+    if (!placed) {
+      rounds.push([match]);
+    }
+  }
+
+  // Optional but recommended: compact rounds further (best-effort pass)
+  // This helps eliminate sparse rounds if any exist.
+  // It is safe because it only moves matches into earlier rounds when valid.
+  for (let i = rounds.length - 1; i >= 0; i--) {
+    const round = rounds[i];
+    for (let j = round.length - 1; j >= 0; j--) {
+      const m = round[j];
+
+      let moved = false;
+      for (let k = 0; k < i; k++) {
+        if (rounds[k].length >= courtsCount) continue;
+        if (hasConflict(rounds[k], m)) continue;
+
+        rounds[k].push(m);
+        round.splice(j, 1);
+        moved = true;
+        break;
+      }
+
+      if (!moved) {
+        // can't move this match; keep it
+      }
+    }
+
+    if (round.length === 0) {
+      rounds.splice(i, 1);
+    }
+  }
+
+  return rounds;
+}
+
+// -------------------- PERFECT AMERICANO --------------------
+
+/**
+ * Perfect Americano match generation:
+ * - generates ALL matches using circle method
+ * - then globally packs them into rounds using packMatchesIntoRounds()
+ */
+function buildPerfectAmericanoRounds(participants, courtsCount) {
+  const ids = participants.map((p) => p.id);
+  const N = ids.length;
+
+  if (N < 4 || N % 2 !== 0 || courtsCount <= 0) return [];
+
+  const matches = [];
+  const totalRounds = N - 1;
+
+  let left = ids.slice(0, N / 2);
+  let right = ids.slice(N / 2).reverse();
+
+  for (let r = 0; r < totalRounds; r++) {
+    // each iteration produces N/4 matches
+    for (let i = 0; i < left.length; i += 2) {
+      if (i + 1 >= left.length) break;
+
+      matches.push({
+        teams: {
+          A: [left[i], right[i]],
+          B: [left[i + 1], right[i + 1]],
+        },
+      });
+    }
+
+    // rotate (keep first fixed)
+    const fixed = left[0];
+    const movedLeft = left.splice(1, 1)[0];
+    const movedRight = right.pop();
+
+    left = [fixed, movedRight, ...left.slice(1)];
+    right = [movedLeft, ...right];
+  }
+
+  // GLOBAL repacking to maximize courts usage per round
+  return packMatchesIntoRounds(matches, courtsCount);
+}
+
+// ============================================================================
+// BALANCED AMERICANO (your heuristic; unchanged logic)
+// ============================================================================
+
+function buildBalancedAmericanoRounds(participants, courtsCount) {
   const playerIds = participants.map((p) => p.id);
   const N = playerIds.length;
 
   if (N < 4 || courtsCount <= 0) return [];
 
-  // Max “reasonable” number of matches:
-  // This mirrors your earlier target floor(N*(N-1)/4).
+  // targetMatches = floor((N*(N-1)/2) / 2) = floor(N*(N-1)/4)
   const totalPairs = (N * (N - 1)) / 2;
   const targetMatches = Math.floor(totalPairs / 2);
 
-  // Stats
   const gamesPlayed = {};
   const partnerCount = {};
   const opponentCount = {};
@@ -157,7 +272,6 @@ function buildAmericanoRounds(participants, courtsCount) {
   const rounds = [];
   let matchesCreated = 0;
 
-  // Safety limit to avoid pathological infinite loops
   const MAX_GLOBAL_ITER = targetMatches * 10 || 1000;
   let iter = 0;
 
@@ -167,24 +281,19 @@ function buildAmericanoRounds(participants, courtsCount) {
     const round = [];
     const usedThisRound = new Set();
 
-    // We try to fill all courts in this round
     let localTries = 0;
 
     while (round.length < courtsCount && localTries < N * 4) {
       localTries++;
 
-      // Candidate players for this round = not yet used
       const available = playerIds.filter((id) => !usedThisRound.has(id));
       if (available.length < 4) break;
 
-      // Sort by (gamesPlayed) so that the least-used play first
       available.sort((a, b) => (gamesPlayed[a] || 0) - (gamesPlayed[b] || 0));
 
-      // Take first 6 as pool to build 4-player groups – keeps things local
       const pool = available.slice(0, Math.min(6, available.length));
       if (pool.length < 4) break;
 
-      // Try all 4-player combinations from this small pool
       let bestChoice = null;
       let bestScore = Infinity;
 
@@ -194,7 +303,6 @@ function buildAmericanoRounds(participants, courtsCount) {
             for (let l = k + 1; l < pool.length; l++) {
               const four = [pool[i], pool[j], pool[k], pool[l]];
 
-              // Build optimal 2x2 teams for these four
               const opt = chooseBestTeams(
                 four,
                 partnerCount,
@@ -228,7 +336,6 @@ function buildAmericanoRounds(participants, courtsCount) {
 
       if (!bestChoice) break;
 
-      // Commit this match into current round
       round.push(bestChoice);
       matchesCreated++;
 
@@ -240,49 +347,30 @@ function buildAmericanoRounds(participants, courtsCount) {
       if (matchesCreated >= targetMatches) break;
     }
 
-    if (round.length === 0) {
-      // Could not schedule anything without insane repetition; stop.
-      break;
-    }
+    if (round.length === 0) break;
 
     rounds.push(round);
   }
 
-  // Finally, sort rounds by fullness (most matches first) to push
-  // short rounds toward the end.
   rounds.sort((a, b) => b.length - a.length);
-
   return rounds;
 }
 
 // ============================================================================
-// PUBLIC API – used by your match.service.js
+// PERSISTENCE HELPERS
 // ============================================================================
 
-/**
- * Unified generator (replaces old perfect/non-perfect split).
- * Creates stage_participants + matches for all rounds.
- */
-async function generateAmericanoStageMatches({
-  tournamentId,
-  stageId,
-  participants,
-  courtsCount,
-  client,
-}) {
-  const rounds = buildAmericanoRounds(participants, courtsCount);
+async function persistRounds(rounds, tournamentId, stageId, client) {
   const createdMatches = [];
 
   for (let r = 0; r < rounds.length; r++) {
-    const roundMatches = rounds[r];
-
-    for (const match of roundMatches) {
+    for (const match of rounds[r]) {
       const [A1, A2] = match.teams.A;
       const [B1, B2] = match.teams.B;
 
       const spA = await client.query(
         `INSERT INTO stage_participants
-           (stage_id, player1_id, player2_id, created_at, updated_at)
+         (stage_id, player1_id, player2_id, created_at, updated_at)
          VALUES ($1,$2,$3,NOW(),NOW())
          RETURNING id`,
         [stageId, A1, A2]
@@ -290,7 +378,7 @@ async function generateAmericanoStageMatches({
 
       const spB = await client.query(
         `INSERT INTO stage_participants
-           (stage_id, player1_id, player2_id, created_at, updated_at)
+         (stage_id, player1_id, player2_id, created_at, updated_at)
          VALUES ($1,$2,$3,NOW(),NOW())
          RETURNING id`,
         [stageId, B1, B2]
@@ -298,9 +386,9 @@ async function generateAmericanoStageMatches({
 
       const matchRes = await client.query(
         `INSERT INTO matches
-           (tournament_id, stage_id,
-            stage_player1_id, stage_player2_id,
-            state, round, created_at, updated_at)
+         (tournament_id, stage_id,
+          stage_player1_id, stage_player2_id,
+          state, round, created_at, updated_at)
          VALUES ($1,$2,$3,$4,'pending',$5,NOW(),NOW())
          RETURNING *`,
         [tournamentId, stageId, spA.rows[0].id, spB.rows[0].id, r + 1]
@@ -314,8 +402,56 @@ async function generateAmericanoStageMatches({
 }
 
 // ============================================================================
+// GENERATORS (PUBLIC)
+// ============================================================================
+
+async function generateBalancedAmericanoStageMatches({
+  tournamentId,
+  stageId,
+  participants,
+  courtsCount,
+  client,
+}) {
+  const rounds = buildBalancedAmericanoRounds(participants, courtsCount);
+  return persistRounds(rounds, tournamentId, stageId, client);
+}
+
+async function generatePerfectAmericanoStageMatches({
+  tournamentId,
+  stageId,
+  participants,
+  courtsCount,
+  client,
+}) {
+  const rounds = buildPerfectAmericanoRounds(participants, courtsCount);
+  return persistRounds(rounds, tournamentId, stageId, client);
+}
+
+// Convenience wrapper if you want a single entry-point:
+// - perfect if feasible
+// - else balanced
+async function generateAmericanoStageMatches({
+  tournamentId,
+  stageId,
+  participants,
+  courtsCount,
+  client,
+}) {
+  const n = participants?.length || 0;
+
+  if (isPerfectAmericano(n)) {
+    const rounds = buildPerfectAmericanoRounds(participants, courtsCount);
+    return persistRounds(rounds, tournamentId, stageId, client);
+  }
+
+  const rounds = buildBalancedAmericanoRounds(participants, courtsCount);
+  return persistRounds(rounds, tournamentId, stageId, client);
+}
+
+// ============================================================================
 // AMERICANO LEADERBOARD CALCULATION
 // ============================================================================
+
 async function calculateAmericanoLeaderboard(tournamentId, stageId, client) {
   const matchesRes = await client.query(
     `
@@ -350,9 +486,6 @@ async function calculateAmericanoLeaderboard(tournamentId, stageId, client) {
   const matches = matchesRes.rows;
   if (matches.length === 0) return [];
 
-  // -------------------------------------
-  // Proper stats container
-  // -------------------------------------
   const stats = {};
 
   function ensure(pId, pName) {
@@ -372,9 +505,6 @@ async function calculateAmericanoLeaderboard(tournamentId, stageId, client) {
     }
   }
 
-  // -------------------------------------
-  // Aggregate matches
-  // -------------------------------------
   for (const m of matches) {
     const playersA = [
       { id: m.a1, name: m.a1_name },
@@ -389,7 +519,6 @@ async function calculateAmericanoLeaderboard(tournamentId, stageId, client) {
     playersA.forEach((p) => ensure(p.id, p.name));
     playersB.forEach((p) => ensure(p.id, p.name));
 
-    // Scoring
     if (m.scores_csv) {
       const sets = m.scores_csv.split(",");
       for (const set of sets) {
@@ -408,7 +537,6 @@ async function calculateAmericanoLeaderboard(tournamentId, stageId, client) {
       }
     }
 
-    // Wins
     if (m.winner_id) {
       if (playersA.some((p) => p.id === m.winner_id)) {
         playersA.forEach((p) => stats[p.id].wins++);
@@ -417,22 +545,15 @@ async function calculateAmericanoLeaderboard(tournamentId, stageId, client) {
       }
     }
 
-    // Matches played
     playersA.forEach((p) => stats[p.id].matchesPlayed++);
     playersB.forEach((p) => stats[p.id].matchesPlayed++);
   }
 
-  // -------------------------------------
-  // Derived fields
-  // -------------------------------------
   Object.values(stats).forEach((s) => {
     s.totalPoints = s.pointsFor;
     s.matchDiff = s.pointsFor - s.pointsAgainst;
   });
 
-  // -------------------------------------
-  // Sorting
-  // -------------------------------------
   let ranked = Object.values(stats).sort(
     (a, b) =>
       b.totalPoints - a.totalPoints ||
@@ -440,7 +561,6 @@ async function calculateAmericanoLeaderboard(tournamentId, stageId, client) {
       b.wins - a.wins
   );
 
-  // Head-to-head tie break
   ranked = applyHeadToHeadTiebreak(matches, ranked);
 
   return ranked;
@@ -449,6 +569,7 @@ async function calculateAmericanoLeaderboard(tournamentId, stageId, client) {
 // ============================================================================
 // HEAD-TO-HEAD BETWEEN EXACTLY TWO TIED PLAYERS
 // ============================================================================
+
 function applyHeadToHeadTiebreak(matches, ranked) {
   const out = [...ranked];
 
@@ -463,7 +584,6 @@ function applyHeadToHeadTiebreak(matches, ranked) {
 
     if (!tie) continue;
 
-    // Find direct encounters between p1 and p2
     let p1Points = 0;
     let p2Points = 0;
 
@@ -484,18 +604,15 @@ function applyHeadToHeadTiebreak(matches, ranked) {
         const p2IsA = m.a1 === p2.participant_id || m.a2 === p2.participant_id;
 
         if (p1IsA && !p2IsA) {
-          // p1 on A side, p2 on B side
           p1Points += sa;
           p2Points += sb;
         } else if (!p1IsA && p2IsA) {
-          // p2 on A side, p1 on B side
           p1Points += sb;
           p2Points += sa;
         }
       }
     }
 
-    // If p2 scored more points directly vs p1 → swap
     if (p1Points < p2Points) {
       out[i] = p2;
       out[i + 1] = p1;
@@ -506,6 +623,15 @@ function applyHeadToHeadTiebreak(matches, ranked) {
 }
 
 module.exports = {
+  // recommended single entry-point:
   generateAmericanoStageMatches,
+
+  // if you still want direct calls:
+  generateBalancedAmericanoStageMatches,
+  generatePerfectAmericanoStageMatches,
+
   calculateAmericanoLeaderboard,
+
+  // exported for testing/debug:
+  isPerfectAmericano,
 };
