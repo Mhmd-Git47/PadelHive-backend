@@ -20,33 +20,36 @@ function shuffle(arr) {
 // For "perfect Americano" feasibility.
 // This is your rule, kept as-is, but we also require N even and N>=4.
 function isPerfectAmericano(n) {
-  return n >= 4 && n % 2 === 0 && (n * (n - 1)) % 4 === 0;
+  // 1. Must be at least 4 players
+  // 2. Must be even
+  // 3. Total pairings (N*(N-1)/2) must be even so they can form whole matches
+  return n >= 4 && n % 2 === 0 && ((n * (n - 1)) / 2) % 2 === 0;
 }
 
 // Score a potential match (two teams of 2) given current stats.
 // Lower score = “better” (less repetition).
 function scoreMatch(a1, a2, b1, b2, partnerCount, opponentCount, gamesPlayed) {
+  // 1. Partnership Repetition (Highest Priority)
   const partnerScore =
     (partnerCount[a1]?.[a2] || 0) + (partnerCount[b1]?.[b2] || 0);
 
+  // 2. Opponent Repetition (Medium Priority)
   const opponentScore =
     (opponentCount[a1]?.[b1] || 0) +
     (opponentCount[a1]?.[b2] || 0) +
     (opponentCount[a2]?.[b1] || 0) +
-    (opponentCount[a2]?.[b2] || 0) +
-    (opponentCount[b1]?.[a1] || 0) +
-    (opponentCount[b1]?.[a2] || 0) +
-    (opponentCount[b2]?.[a1] || 0) +
-    (opponentCount[b2]?.[a2] || 0);
+    (opponentCount[a2]?.[b2] || 0);
 
+  // 3. Games Played (Secondary Priority - helps pick players who have rested)
+  // FIX: Define gamesScore by summing up the games each participant has played
   const gamesScore =
     (gamesPlayed[a1] || 0) +
     (gamesPlayed[a2] || 0) +
     (gamesPlayed[b1] || 0) +
     (gamesPlayed[b2] || 0);
 
-  // weights can be tuned; partners/opponents more important than gamesPlayed
-  return partnerScore * 10 + opponentScore * 2 + gamesScore;
+  // Use 1000 for partners to strictly avoid repeats
+  return partnerScore * 1000 + opponentScore * 5 + gamesScore;
 }
 
 // Choose best split of 4 players into two teams of 2.
@@ -135,76 +138,11 @@ function applyMatchStats(match, partnerCount, opponentCount, gamesPlayed) {
 
 // -------------------- PACKING HELPERS --------------------
 
-function matchPlayers(match) {
-  return [...match.teams.A, ...match.teams.B];
-}
-
-function hasConflict(round, match) {
-  const players = matchPlayers(match);
-  for (const m of round) {
-    const used = matchPlayers(m);
-    // any overlap => conflict
-    if (players.some((p) => used.includes(p))) return true;
-  }
-  return false;
-}
-
 /**
  * Global packer:
  * - tries to pack each match into the earliest round it fits (first-fit)
  * - guarantees: no player repeats within a round, and max courtsCount per round
  */
-function packMatchesIntoRounds(matches, courtsCount) {
-  const rounds = [];
-
-  for (const match of matches) {
-    let placed = false;
-
-    for (const round of rounds) {
-      if (round.length >= courtsCount) continue;
-      if (hasConflict(round, match)) continue;
-
-      round.push(match);
-      placed = true;
-      break;
-    }
-
-    if (!placed) {
-      rounds.push([match]);
-    }
-  }
-
-  // Optional but recommended: compact rounds further (best-effort pass)
-  // This helps eliminate sparse rounds if any exist.
-  // It is safe because it only moves matches into earlier rounds when valid.
-  for (let i = rounds.length - 1; i >= 0; i--) {
-    const round = rounds[i];
-    for (let j = round.length - 1; j >= 0; j--) {
-      const m = round[j];
-
-      let moved = false;
-      for (let k = 0; k < i; k++) {
-        if (rounds[k].length >= courtsCount) continue;
-        if (hasConflict(rounds[k], m)) continue;
-
-        rounds[k].push(m);
-        round.splice(j, 1);
-        moved = true;
-        break;
-      }
-
-      if (!moved) {
-        // can't move this match; keep it
-      }
-    }
-
-    if (round.length === 0) {
-      rounds.splice(i, 1);
-    }
-  }
-
-  return rounds;
-}
 
 // -------------------- PERFECT AMERICANO --------------------
 
@@ -213,42 +151,335 @@ function packMatchesIntoRounds(matches, courtsCount) {
  * - generates ALL matches using circle method
  * - then globally packs them into rounds using packMatchesIntoRounds()
  */
-function buildPerfectAmericanoRounds(participants, courtsCount) {
-  const ids = participants.map((p) => p.id);
+function buildRoundRobinPairs(ids) {
   const N = ids.length;
+  if (N < 2 || N % 2 !== 0) return [];
 
-  if (N < 4 || N % 2 !== 0 || courtsCount <= 0) return [];
+  let arr = [...ids];
+  const rounds = [];
 
-  const matches = [];
-  const totalRounds = N - 1;
-
-  let left = ids.slice(0, N / 2);
-  let right = ids.slice(N / 2).reverse();
-
-  for (let r = 0; r < totalRounds; r++) {
-    // each iteration produces N/4 matches
-    for (let i = 0; i < left.length; i += 2) {
-      if (i + 1 >= left.length) break;
-
-      matches.push({
-        teams: {
-          A: [left[i], right[i]],
-          B: [left[i + 1], right[i + 1]],
-        },
-      });
+  for (let r = 0; r < N - 1; r++) {
+    const pairs = [];
+    for (let i = 0; i < N / 2; i++) {
+      pairs.push([arr[i], arr[N - 1 - i]]);
     }
+    rounds.push(pairs);
 
-    // rotate (keep first fixed)
-    const fixed = left[0];
-    const movedLeft = left.splice(1, 1)[0];
-    const movedRight = right.pop();
-
-    left = [fixed, movedRight, ...left.slice(1)];
-    right = [movedLeft, ...right];
+    const fixed = arr[0];
+    const rest = arr.slice(1);
+    rest.unshift(rest.pop());
+    arr = [fixed, ...rest];
   }
 
-  // GLOBAL repacking to maximize courts usage per round
-  return packMatchesIntoRounds(matches, courtsCount);
+  return rounds;
+}
+
+function shuffleWithSeed(arr, seed) {
+  const a = [...arr];
+  let s = seed + 1;
+
+  for (let i = a.length - 1; i > 0; i--) {
+    s = (s * 9301 + 49297) % 233280;
+    const j = Math.floor((s / 233280) * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+
+  return a;
+}
+
+function playersInMatch(match) {
+  return [...match.teams.A, ...match.teams.B];
+}
+
+function normalizeId(x) {
+  // choose ONE canonical type everywhere:
+  // string is safest for DB + JS objects + Set keys
+  return String(x);
+}
+
+function normalizeParticipants(participants) {
+  // also guard against duplicates
+  const ids = participants.map((p) => normalizeId(p.id));
+  const seen = new Set();
+  for (const id of ids) {
+    if (seen.has(id)) {
+      throw new Error(`Duplicate participant id after normalization: ${id}`);
+    }
+    seen.add(id);
+  }
+  return ids;
+}
+
+/**
+ * Packs matches into rounds:
+ * - each round has up to courtsCount matches
+ * - no player repeats within a round
+ * - tries to fill rounds as much as possible (so most rounds == courtsCount)
+ * - only the final overall round may have fewer matches
+ */
+
+function validateSchedule(rounds, ids, courtsCount) {
+  const N = ids.length;
+  const idSet = new Set(ids);
+
+  const expectedMatches = (N - 1) * (N / 4); // valid because isPerfectAmericano ensures divisibility
+  const expectedGamesPerPlayer = N - 1;
+
+  const games = Object.fromEntries(ids.map((id) => [id, 0]));
+  const partnerSeen = new Set(); // unordered pair "a|b"
+  const matchSeen = new Set(); // matchKey
+
+  let matchCount = 0;
+
+  const pairKey = (a, b) => {
+    const x = String(a),
+      y = String(b);
+    return x < y ? `${x}|${y}` : `${y}|${x}`;
+  };
+
+  for (let r = 0; r < rounds.length; r++) {
+    const round = rounds[r];
+    if (round.length > courtsCount) {
+      throw new Error(
+        `Round ${r + 1} exceeds courtsCount (${round.length} > ${courtsCount})`
+      );
+    }
+
+    const used = new Set();
+
+    for (const m of round) {
+      const A = m.teams?.A;
+      const B = m.teams?.B;
+      if (!A || !B || A.length !== 2 || B.length !== 2) {
+        throw new Error(`Invalid match structure in round ${r + 1}`);
+      }
+
+      const players = [...A, ...B].map(String);
+
+      // All 4 distinct
+      if (new Set(players).size !== 4) {
+        throw new Error(
+          `Match has duplicate player(s) in round ${r + 1}: ${players.join(
+            ","
+          )}`
+        );
+      }
+
+      // All players exist
+      for (const p of players) {
+        if (!idSet.has(p))
+          throw new Error(`Unknown player id "${p}" in round ${r + 1}`);
+      }
+
+      // No player repeats in the round
+      for (const p of players) {
+        if (used.has(p))
+          throw new Error(`Player "${p}" repeats in round ${r + 1}`);
+        used.add(p);
+      }
+
+      // Match uniqueness
+      const mk = matchKey({
+        teams: { A: players.slice(0, 2), B: players.slice(2, 4) },
+      });
+      if (matchSeen.has(mk)) throw new Error(`Duplicate match detected: ${mk}`);
+      matchSeen.add(mk);
+
+      // Partner uniqueness
+      const pA = pairKey(A[0], A[1]);
+      const pB = pairKey(B[0], B[1]);
+      if (partnerSeen.has(pA)) throw new Error(`Repeated partner pair: ${pA}`);
+      if (partnerSeen.has(pB)) throw new Error(`Repeated partner pair: ${pB}`);
+      partnerSeen.add(pA);
+      partnerSeen.add(pB);
+
+      // Games count
+      for (const p of players) games[p]++;
+
+      matchCount++;
+    }
+  }
+
+  if (matchCount !== expectedMatches) {
+    throw new Error(
+      `Total matches ${matchCount} != expected ${expectedMatches}`
+    );
+  }
+
+  for (const id of ids) {
+    if (games[id] !== expectedGamesPerPlayer) {
+      throw new Error(
+        `Player ${id} games ${games[id]} != expected ${expectedGamesPerPlayer}`
+      );
+    }
+  }
+
+  // Note: with N=12, courts=2 => expectedMatches=33 => rounds will be 17, last round will have 1 match.
+  // That is mathematically unavoidable unless you add a "dummy match" or allow repeats.
+  return true;
+}
+
+function normalizeTeam(team) {
+  return [...team].map(String).sort();
+}
+
+function matchKey(match) {
+  const A = normalizeTeam(match.teams.A);
+  const B = normalizeTeam(match.teams.B);
+
+  const aKey = A.join("|");
+  const bKey = B.join("|");
+
+  // Order-independent key: A vs B === B vs A
+  return aKey < bKey ? `${aKey}__VS__${bKey}` : `${bKey}__VS__${aKey}`;
+}
+
+function splitLogicalRounds(rrPairRounds, courtsCount) {
+  const physicalRounds = [];
+
+  for (const logicalRound of rrPairRounds) {
+    // logicalRound = array of matches (already conflict-free)
+    for (let i = 0; i < logicalRound.length; i += courtsCount) {
+      physicalRounds.push(logicalRound.slice(i, i + courtsCount));
+    }
+  }
+
+  return physicalRounds;
+}
+
+function regroupByLogicalRound(physicalRounds, courtsCount) {
+  const map = new Map();
+
+  for (const round of physicalRounds) {
+    for (const match of round) {
+      const lr = match.meta.logicalRound;
+      if (!map.has(lr)) map.set(lr, []);
+      map.get(lr).push(match);
+    }
+  }
+
+  const regroupedRounds = [];
+
+  for (const [, matches] of [...map.entries()].sort((a, b) => a[0] - b[0])) {
+    for (let i = 0; i < matches.length; i += courtsCount) {
+      regroupedRounds.push(matches.slice(i, i + courtsCount));
+    }
+  }
+
+  return regroupedRounds;
+}
+
+function validatePhysicalRound(roundMatches) {
+  const seenPlayers = new Set();
+  for (const match of roundMatches) {
+    const players = [...match.teams.A, ...match.teams.B];
+    for (const p of players) {
+      if (seenPlayers.has(p)) return false; // Double booking detected!
+      seenPlayers.add(p);
+    }
+  }
+  return true;
+}
+
+function buildPerfectAmericanoRounds(participants, courtsCount) {
+  const ids = participants.map((p) => String(p.id));
+  const N = ids.length;
+
+  if (!isPerfectAmericano(N)) {
+    throw new Error("Perfect Americano conditions not met.");
+  }
+
+  // 1. Generate all unique matches (33 for 12 players)
+  const logicalPairRounds = buildRoundRobinPairs(ids);
+  let matchPool = [];
+
+  logicalPairRounds.forEach((roundPairs, roundIdx) => {
+    // Shuffling within the pool helps variability
+    const shuffledPairs = shuffle(roundPairs);
+    for (let i = 0; i < shuffledPairs.length; i += 2) {
+      matchPool.push({
+        meta: { logicalRound: roundIdx + 1 },
+        teams: { A: shuffledPairs[i], B: shuffledPairs[i + 1] },
+      });
+    }
+  });
+
+  // 2. Greedy Packing into Physical Rounds
+  const physicalRounds = [];
+
+  while (matchPool.length > 0) {
+    const currentRound = [];
+    const playersInRound = new Set();
+
+    for (let i = 0; i < matchPool.length; i++) {
+      const match = matchPool[i];
+      const playersInMatch = [...match.teams.A, ...match.teams.B];
+      const hasConflict = playersInMatch.some((p) => playersInRound.has(p));
+
+      if (!hasConflict) {
+        currentRound.push(match);
+        playersInMatch.forEach((p) => playersInRound.add(p));
+        matchPool.splice(i, 1);
+        i--;
+
+        if (currentRound.length === courtsCount) break;
+      }
+    }
+
+    if (currentRound.length > 0) {
+      physicalRounds.push(currentRound);
+    } else {
+      // Logic fallback: If packing gets stuck, it's usually due to a bad random shuffle.
+      // In a real app, you could retry with a different seed here.
+      throw new Error("Could not pack matches without conflicts.");
+    }
+  }
+
+  // ============================================================
+  // CRITICAL FIX: Ensure the short round is always the LAST round
+  // ============================================================
+  physicalRounds.sort((a, b) => b.length - a.length);
+
+  return physicalRounds;
+}
+
+function buildPerfectAmericanoRoundsWithRetries(
+  participants,
+  courtsCount,
+  stableSeed
+) {
+  // stableSeed could be tournamentId/stageId hash for reproducibility
+  for (let attempt = 0; attempt < 50; attempt++) {
+    try {
+      return buildPerfectAmericanoRounds(
+        participants,
+        courtsCount,
+        stableSeed + attempt
+      );
+    } catch (e) {
+      // retry next seed
+      if (attempt === 49) throw e;
+    }
+  }
+}
+
+async function generatePerfectAmericanoStageMatches({
+  tournamentId,
+  stageId,
+  participants,
+  courtsCount,
+  client,
+}) {
+  const stableSeed = Number(String(tournamentId).slice(-6)) || 1;
+
+  // Just generate and persist
+  const rounds = buildPerfectAmericanoRoundsWithRetries(
+    participants,
+    courtsCount,
+    stableSeed
+  );
+
+  return persistRounds(rounds, tournamentId, stageId, client);
 }
 
 // ============================================================================
@@ -256,7 +487,7 @@ function buildPerfectAmericanoRounds(participants, courtsCount) {
 // ============================================================================
 
 function buildBalancedAmericanoRounds(participants, courtsCount) {
-  const playerIds = participants.map((p) => p.id);
+  const playerIds = participants.map((p) => String(p.id));
   const N = playerIds.length;
 
   if (N < 4 || courtsCount <= 0) return [];
@@ -291,7 +522,7 @@ function buildBalancedAmericanoRounds(participants, courtsCount) {
 
       available.sort((a, b) => (gamesPlayed[a] || 0) - (gamesPlayed[b] || 0));
 
-      const pool = available.slice(0, Math.min(6, available.length));
+      const pool = available.slice(0, Math.min(10, available.length));
       if (pool.length < 4) break;
 
       let bestChoice = null;
@@ -416,17 +647,6 @@ async function generateBalancedAmericanoStageMatches({
   return persistRounds(rounds, tournamentId, stageId, client);
 }
 
-async function generatePerfectAmericanoStageMatches({
-  tournamentId,
-  stageId,
-  participants,
-  courtsCount,
-  client,
-}) {
-  const rounds = buildPerfectAmericanoRounds(participants, courtsCount);
-  return persistRounds(rounds, tournamentId, stageId, client);
-}
-
 // Convenience wrapper if you want a single entry-point:
 // - perfect if feasible
 // - else balanced
@@ -440,8 +660,13 @@ async function generateAmericanoStageMatches({
   const n = participants?.length || 0;
 
   if (isPerfectAmericano(n)) {
-    const rounds = buildPerfectAmericanoRounds(participants, courtsCount);
-    return persistRounds(rounds, tournamentId, stageId, client);
+    return generatePerfectAmericanoStageMatches({
+      tournamentId,
+      stageId,
+      participants,
+      courtsCount,
+      client,
+    });
   }
 
   const rounds = buildBalancedAmericanoRounds(participants, courtsCount);
