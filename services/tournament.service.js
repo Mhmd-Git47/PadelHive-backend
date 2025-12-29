@@ -246,6 +246,7 @@ const getPublicTournamentsPaginated = async ({
 }) => {
   const offset = page * size;
 
+  // ---------------- SORT ----------------
   const sortMap = {
     date: "t.start_at",
     name: "t.name",
@@ -254,32 +255,31 @@ const getPublicTournamentsPaginated = async ({
   const sortColumn = sortMap[sortBy] || "t.start_at";
   const order = sortOrder === "desc" ? "DESC" : "ASC";
 
+  // ---------------- STATE CONDITION ----------------
+  let stateCondition = `t.state IN ('pending', 'in progress')`;
+
+  if (status === "completed") {
+    stateCondition = `t.state = 'completed'`;
+  }
+
+  // ---------------- DATA QUERY ----------------
   const dataQuery = `
     SELECT
-      -- ids
       t.id,
-      t.company_id       AS company_id,
-      t.location_id        AS location_id,
-
-      -- basic info
+      t.company_id,
+      t.location_id,
       t.name,
       t.description,
       t.category,
       t.state,
       t.private,
-
-      -- timing
       t.start_at,
       t.completed_at,
       t.registration_deadline,
       t.payment_deadline,
-
-      -- registration
       t.registration_fee,
       t.registration_type,
-      t.open_registration        AS open_registration,
-
-      -- limits & format
+      t.open_registration,
       t.participants_per_group,
       t.participants_advance,
       t.max_allowed_teams,
@@ -287,28 +287,20 @@ const getPublicTournamentsPaginated = async ({
       t.competition_type,
       t.tournament_type,
       t.tournament_format,
-
-      -- prizes
       t.prize_pool,
       t.prize_1st,
       t.prize_2nd,
       t.prize_3rd,
       t.prize_mvp,
-
-      -- media & display
       t.poster_url,
       t.rules_json,
       t.show_rules,
       t.courts_count,
-
-      -- stats
       t.participants_count,
 
-      -- location (optional but useful)
       l.city AS location_city,
       l.name AS location_name,
 
-      -- company (optional but useful)
       c.club_name AS company_name
 
     FROM tournaments t
@@ -316,25 +308,25 @@ const getPublicTournamentsPaginated = async ({
     JOIN companies c ON c.id = t.company_id
 
     WHERE t.private = false
-      AND t.state IN ('pending', 'in progress')
+      AND ${stateCondition}
       AND ($3::text IS NULL OR t.category = $3)
       AND ($4::text IS NULL OR l.city ILIKE $4)
-      AND ($5::text IS NULL OR t.state = $5)
-      AND ($6::text IS NULL OR t.name ILIKE $6)
+      AND ($5::text IS NULL OR t.name ILIKE $5)
 
     ORDER BY ${sortColumn} ${order}
     LIMIT $1 OFFSET $2
   `;
 
+  // ---------------- COUNT QUERY (MUST MATCH) ----------------
   const countQuery = `
     SELECT COUNT(*)
     FROM tournaments t
     JOIN locations l ON l.id = t.location_id
     WHERE t.private = false
+      AND ${stateCondition}
       AND ($1::text IS NULL OR t.category = $1)
       AND ($2::text IS NULL OR l.city ILIKE $2)
-      AND ($3::text IS NULL OR t.state = $3)
-      AND ($4::text IS NULL OR t.name ILIKE $4)
+      AND ($3::text IS NULL OR t.name ILIKE $3)
   `;
 
   const dataValues = [
@@ -342,14 +334,12 @@ const getPublicTournamentsPaginated = async ({
     offset,
     category || null,
     city ? `%${city}%` : null,
-    status || null,
     search ? `%${search}%` : null,
   ];
 
   const countValues = [
     category || null,
     city ? `%${city}%` : null,
-    status || null,
     search ? `%${search}%` : null,
   ];
 
@@ -359,7 +349,7 @@ const getPublicTournamentsPaginated = async ({
   ]);
 
   return {
-    items: dataResult.rows, // 👈 IMPORTANT: raw rows, frontend maps them
+    items: dataResult.rows,
     total: Number(countResult.rows[0].count),
     page,
     size,
