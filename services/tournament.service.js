@@ -234,6 +234,138 @@ const getAllTournaments = async () => {
   return result.rows;
 };
 
+const getPublicTournamentsPaginated = async ({
+  page = 0,
+  size = 10,
+  category,
+  city,
+  status,
+  search,
+  sortBy = "date",
+  sortOrder = "asc",
+}) => {
+  const offset = page * size;
+
+  const sortMap = {
+    date: "t.start_at",
+    name: "t.name",
+  };
+
+  const sortColumn = sortMap[sortBy] || "t.start_at";
+  const order = sortOrder === "desc" ? "DESC" : "ASC";
+
+  const dataQuery = `
+    SELECT
+      -- ids
+      t.id,
+      t.company_id       AS company_id,
+      t.location_id        AS location_id,
+
+      -- basic info
+      t.name,
+      t.description,
+      t.category,
+      t.state,
+      t.private,
+
+      -- timing
+      t.start_at,
+      t.completed_at,
+      t.registration_deadline,
+      t.payment_deadline,
+
+      -- registration
+      t.registration_fee,
+      t.registration_type,
+      t.open_registration        AS open_registration,
+
+      -- limits & format
+      t.participants_per_group,
+      t.participants_advance,
+      t.max_allowed_teams,
+      t.max_allowed_elo_rate,
+      t.competition_type,
+      t.tournament_type,
+      t.tournament_format,
+
+      -- prizes
+      t.prize_pool,
+      t.prize_1st,
+      t.prize_2nd,
+      t.prize_3rd,
+      t.prize_mvp,
+
+      -- media & display
+      t.poster_url,
+      t.rules_json,
+      t.show_rules,
+      t.courts_count,
+
+      -- stats
+      t.participants_count,
+
+      -- location (optional but useful)
+      l.city AS location_city,
+      l.name AS location_name,
+
+      -- company (optional but useful)
+      c.club_name AS company_name
+
+    FROM tournaments t
+    JOIN locations l ON l.id = t.location_id
+    JOIN companies c ON c.id = t.company_id
+
+    WHERE t.private = false
+      AND t.state IN ('pending', 'in progress')
+      AND ($3::text IS NULL OR t.category = $3)
+      AND ($4::text IS NULL OR l.city ILIKE $4)
+      AND ($5::text IS NULL OR t.state = $5)
+      AND ($6::text IS NULL OR t.name ILIKE $6)
+
+    ORDER BY ${sortColumn} ${order}
+    LIMIT $1 OFFSET $2
+  `;
+
+  const countQuery = `
+    SELECT COUNT(*)
+    FROM tournaments t
+    JOIN locations l ON l.id = t.location_id
+    WHERE t.private = false
+      AND ($1::text IS NULL OR t.category = $1)
+      AND ($2::text IS NULL OR l.city ILIKE $2)
+      AND ($3::text IS NULL OR t.state = $3)
+      AND ($4::text IS NULL OR t.name ILIKE $4)
+  `;
+
+  const dataValues = [
+    size,
+    offset,
+    category || null,
+    city ? `%${city}%` : null,
+    status || null,
+    search ? `%${search}%` : null,
+  ];
+
+  const countValues = [
+    category || null,
+    city ? `%${city}%` : null,
+    status || null,
+    search ? `%${search}%` : null,
+  ];
+
+  const [dataResult, countResult] = await Promise.all([
+    pool.query(dataQuery, dataValues),
+    pool.query(countQuery, countValues),
+  ]);
+
+  return {
+    items: dataResult.rows, // 👈 IMPORTANT: raw rows, frontend maps them
+    total: Number(countResult.rows[0].count),
+    page,
+    size,
+  };
+};
+
 const getTournamentsByCompanyId = async (companyId) => {
   const tournaments = await pool.query(
     `
@@ -356,6 +488,7 @@ module.exports = {
   createTournament,
   updateTournament,
   getAllTournaments,
+  getPublicTournamentsPaginated,
   getTournamentById,
   getFeaturedSponsorByTournamentId,
   getTournamentsByCompanyId,

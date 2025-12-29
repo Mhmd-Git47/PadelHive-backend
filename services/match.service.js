@@ -925,24 +925,25 @@ const resetMatchScores = async (matchId) => {
 };
 
 // 🔴 AMERICANO (INDIVIDUAL) GENERATION
-const generateMatchesForSingleAmericanoStage = async (tournamentId) => {
+const generateMatchesForSingleAmericanoStage = async (
+  tournamentId,
+  sideAssignments
+) => {
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
 
+    // 1. Get Tournament Data
     const tournamentRes = await client.query(
-      `SELECT id, tournament_format, courts_count
-       FROM tournaments WHERE id = $1`,
+      `SELECT id, tournament_format, courts_count FROM tournaments WHERE id = $1`,
       [tournamentId]
     );
-
-    if (tournamentRes.rowCount === 0) {
+    if (tournamentRes.rowCount === 0)
       throw new AppError("Tournament not found.", 400);
-    }
-
     const tournament = tournamentRes.rows[0];
 
+    // 2. Format Validation
     if (tournament.tournament_format !== "americano_single") {
       throw new AppError(
         "Tournament is not set to Americano(Individual).",
@@ -950,14 +951,15 @@ const generateMatchesForSingleAmericanoStage = async (tournamentId) => {
       );
     }
 
+    // 3. Prevent Duplicates
     const existingMatches = await client.query(
       `SELECT 1 FROM matches WHERE tournament_id = $1 LIMIT 1`,
       [tournamentId]
     );
-    if (existingMatches.rowCount > 0) {
-      throw new AppError("Matches already exist for this tournament.", 400);
-    }
+    if (existingMatches.rowCount > 0)
+      throw new AppError("Matches already exist.", 400);
 
+    // 4. Get Stage and Participants
     const stageRes = await client.query(
       `SELECT id FROM stages WHERE tournament_id = $1`,
       [tournamentId]
@@ -968,37 +970,20 @@ const generateMatchesForSingleAmericanoStage = async (tournamentId) => {
       `SELECT id FROM participants WHERE tournament_id = $1`,
       [tournamentId]
     );
-    if (participantsRes.rowCount < 4) {
-      throw new AppError("Not enough participants yet!", 401);
-    }
+    if (participantsRes.rowCount < 4)
+      throw new AppError("Not enough participants (min 4).", 400);
 
-    const participants = participantsRes.rows;
-
-    // const createdMatches = await americanoHelper.generateAmericanoStageMatches({
-    //   tournamentId,
-    //   stageId: stage.id,
-    //   participants,
-    //   courtsCount: tournament.courts_count,
-    //   client,
-    // });
-
-    const isPerfect = isPerfectAmericano(participants.length);
-
-    const createdMatches = isPerfect
-      ? await americanoHelper.generatePerfectAmericanoStageMatches({
-          tournamentId,
-          stageId: stage.id,
-          participants,
-          courtsCount: tournament.courts_count,
-          client,
-        })
-      : await americanoHelper.generateBalancedAmericanoStageMatches({
-          tournamentId,
-          stageId: stage.id,
-          participants,
-          courtsCount: tournament.courts_count,
-          client,
-        });
+    // 5. CALL THE HELPER
+    // We pass sideAssignments. The helper will automatically choose
+    // "Balanced" logic if sideAssignments are present.
+    const createdMatches = await americanoHelper.generateAmericanoStageMatches({
+      tournamentId,
+      stageId: stage.id,
+      participants: participantsRes.rows,
+      courtsCount: tournament.courts_count,
+      client,
+      sideAssignments, // This is the key "Positional" trigger
+    });
 
     await client.query("COMMIT");
     return createdMatches;

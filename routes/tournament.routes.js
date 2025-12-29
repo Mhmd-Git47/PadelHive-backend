@@ -28,6 +28,7 @@ const upload = multer({ storage, fileFilter });
  * - Can view tournaments without restrictions
  */
 router.get("/", tournamentController.getAllTournaments);
+router.get("/public", tournamentController.getPublicTournaments);
 
 // user tournaments history
 router.get("/user/:userId", tournamentController.getTournamentsByUserId);

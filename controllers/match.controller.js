@@ -13,7 +13,6 @@ exports.createMatch = async (req, res) => {
 
 exports.updateMatch = async (req, res) => {
   try {
-    console.log("begin");
     const { id } = req.params;
     const updatedData = req.body;
 
@@ -183,10 +182,10 @@ exports.resetMatchScores = async (req, res, next) => {
 
 exports.generateMatchesForSingleAmericanoStage = async (req, res, next) => {
   try {
-    const { tournamentId } = req.body;
-    console.log(tournamentId);
+    const { tournamentId, sideAssignments } = req.body;
     const result = await matchService.generateMatchesForSingleAmericanoStage(
-      tournamentId
+      tournamentId,
+      sideAssignments
     );
 
     return res.status(201).json({ success: true, matches: result });

@@ -28,34 +28,62 @@ function isPerfectAmericano(n) {
 
 // Score a potential match (two teams of 2) given current stats.
 // Lower score = “better” (less repetition).
-function scoreMatch(a1, a2, b1, b2, partnerCount, opponentCount, gamesPlayed) {
-  // 1. Partnership Repetition (Highest Priority)
-  const partnerScore =
-    (partnerCount[a1]?.[a2] || 0) + (partnerCount[b1]?.[b2] || 0);
+const partnerHistory = {}; // Format: { "player1|player2": lastRoundNumber }
 
-  // 2. Opponent Repetition (Medium Priority)
-  const opponentScore =
+function scoreMatch(
+  a1,
+  a2,
+  b1,
+  b2,
+  partnerCount,
+  opponentCount,
+  gamesPlayed,
+  sideAssignments,
+  currentRound
+) {
+  let penalty = 0;
+
+  // 1. POSITIONAL PENALTY (CRITICAL)
+  if (sideAssignments) {
+    if (sideAssignments[a1] === sideAssignments[a2]) penalty += 100000;
+    if (sideAssignments[b1] === sideAssignments[b2]) penalty += 100000;
+  }
+
+  // 2. PARTNER REPETITION + COOLDOWN
+  const pA = partnerCount[a1]?.[a2] || 0;
+  const pB = partnerCount[b1]?.[b2] || 0;
+
+  // High penalty for repeating partners at all
+  penalty += pA * 20000 + pB * 20000;
+
+  // COOLDOWN: If they played together recently, add a massive penalty
+  const keyA = a1 < a2 ? `${a1}|${a2}` : `${a2}|${a1}`;
+  const lastRoundA = partnerHistory[keyA] || -100;
+  if (currentRound - lastRoundA < 6) {
+    // Must wait at least 6 rounds to repeat
+    penalty += 50000 / (currentRound - lastRoundA);
+  }
+
+  // 3. OPPONENT REPETITION
+  const oScore =
     (opponentCount[a1]?.[b1] || 0) +
     (opponentCount[a1]?.[b2] || 0) +
     (opponentCount[a2]?.[b1] || 0) +
     (opponentCount[a2]?.[b2] || 0);
+  penalty += oScore * 1000;
 
-  // 3. Games Played (Secondary Priority - helps pick players who have rested)
-  // FIX: Define gamesScore by summing up the games each participant has played
-  const gamesScore =
-    (gamesPlayed[a1] || 0) +
-    (gamesPlayed[a2] || 0) +
-    (gamesPlayed[b1] || 0) +
-    (gamesPlayed[b2] || 0);
-
-  // Use 1000 for partners to strictly avoid repeats
-  return partnerScore * 1000 + opponentScore * 5 + gamesScore;
+  return penalty + Math.random(); // Jitter to prevent loops
 }
 
 // Choose best split of 4 players into two teams of 2.
-function chooseBestTeams(players, partnerCount, opponentCount, gamesPlayed) {
+function chooseBestTeams(
+  players,
+  partnerCount,
+  opponentCount,
+  gamesPlayed,
+  sideAssignments
+) {
   const [p1, p2, p3, p4] = players;
-
   const options = [
     { A: [p1, p2], B: [p3, p4] },
     { A: [p1, p3], B: [p2, p4] },
@@ -73,24 +101,32 @@ function chooseBestTeams(players, partnerCount, opponentCount, gamesPlayed) {
       opt.B[1],
       partnerCount,
       opponentCount,
-      gamesPlayed
+      gamesPlayed,
+      sideAssignments
     );
     if (s < bestScore) {
       bestScore = s;
       best = opt;
     }
   }
-
   return best;
 }
 
 // Update stats after committing a match
-function applyMatchStats(match, partnerCount, opponentCount, gamesPlayed) {
+function applyMatchStats(
+  match,
+  partnerCount,
+  opponentCount,
+  gamesPlayed,
+  lastPartnerRound,
+  roundNum
+) {
   const players = [...match.teams.A, ...match.teams.B];
 
-  for (const p of players) {
+  // 1. Increment Games Played
+  players.forEach((p) => {
     gamesPlayed[p] = (gamesPlayed[p] || 0) + 1;
-  }
+  });
 
   const [a1, a2] = match.teams.A;
   const [b1, b2] = match.teams.B;
@@ -99,34 +135,33 @@ function applyMatchStats(match, partnerCount, opponentCount, gamesPlayed) {
     if (!obj[key]) obj[key] = {};
   };
 
-  // partners
-  ensure(partnerCount, a1);
-  ensure(partnerCount, a2);
-  ensure(partnerCount, b1);
-  ensure(partnerCount, b2);
+  // 2. Partners & Cooldown
+  [
+    [a1, a2],
+    [b1, b2],
+  ].forEach(([p1, p2]) => {
+    ensure(partnerCount, p1);
+    ensure(partnerCount, p2);
+    partnerCount[p1][p2] = (partnerCount[p1][p2] || 0) + 1;
+    partnerCount[p2][p1] = partnerCount[p1][p2];
 
-  partnerCount[a1][a2] = (partnerCount[a1][a2] || 0) + 1;
-  partnerCount[a2][a1] = partnerCount[a1][a2];
+    const key = p1 < p2 ? `${p1}|${p2}` : `${p2}|${p1}`;
+    lastPartnerRound[key] = roundNum;
+  });
 
-  partnerCount[b1][b2] = (partnerCount[b1][b2] || 0) + 1;
-  partnerCount[b2][b1] = partnerCount[b1][b2];
-
-  // opponents – increment for every cross pair
+  // 3. Opponents
   const vsPairs = [
     [a1, b1],
     [a1, b2],
     [a2, b1],
     [a2, b2],
-    [b1, a1],
-    [b1, a2],
-    [b2, a1],
-    [b2, a2],
   ];
-
-  for (const [x, y] of vsPairs) {
+  vsPairs.forEach(([x, y]) => {
     ensure(opponentCount, x);
+    ensure(opponentCount, y);
     opponentCount[x][y] = (opponentCount[x][y] || 0) + 1;
-  }
+    opponentCount[y][x] = opponentCount[x][y];
+  });
 }
 
 // ============================================================================
@@ -486,105 +521,135 @@ async function generatePerfectAmericanoStageMatches({
 // BALANCED AMERICANO (your heuristic; unchanged logic)
 // ============================================================================
 
-function buildBalancedAmericanoRounds(participants, courtsCount) {
+function buildBalancedAmericanoRounds(
+  participants,
+  courtsCount,
+  sideAssignments
+) {
   const playerIds = participants.map((p) => String(p.id));
   const N = playerIds.length;
-
-  if (N < 4 || courtsCount <= 0) return [];
-
-  // targetMatches = floor((N*(N-1)/2) / 2) = floor(N*(N-1)/4)
-  const totalPairs = (N * (N - 1)) / 2;
-  const targetMatches = Math.floor(totalPairs / 2);
+  if (N < 4) return [];
 
   const gamesPlayed = {};
   const partnerCount = {};
   const opponentCount = {};
+  const lastPartnerRound = {};
 
   const rounds = [];
+  const totalMatchesTarget = Math.floor((N * (N - 1)) / 4);
   let matchesCreated = 0;
 
-  const MAX_GLOBAL_ITER = targetMatches * 10 || 1000;
-  let iter = 0;
-
-  while (matchesCreated < targetMatches && iter < MAX_GLOBAL_ITER) {
-    iter++;
-
-    const round = [];
+  // Safety limit for rounds to avoid infinite loops
+  for (let r = 1; r <= 100; r++) {
+    const roundMatches = [];
     const usedThisRound = new Set();
 
-    let localTries = 0;
-
-    while (round.length < courtsCount && localTries < N * 4) {
-      localTries++;
-
+    for (let c = 0; c < courtsCount; c++) {
       const available = playerIds.filter((id) => !usedThisRound.has(id));
       if (available.length < 4) break;
 
       available.sort((a, b) => (gamesPlayed[a] || 0) - (gamesPlayed[b] || 0));
+      const pool = available.slice(0, Math.min(available.length, 10));
 
-      const pool = available.slice(0, Math.min(10, available.length));
-      if (pool.length < 4) break;
-
-      let bestChoice = null;
+      let bestCombo = null;
       let bestScore = Infinity;
 
+      // Exhaustive search of the top pool
       for (let i = 0; i < pool.length; i++) {
         for (let j = i + 1; j < pool.length; j++) {
           for (let k = j + 1; k < pool.length; k++) {
             for (let l = k + 1; l < pool.length; l++) {
               const four = [pool[i], pool[j], pool[k], pool[l]];
+              const options = [
+                { A: [four[0], four[1]], B: [four[2], four[3]] },
+                { A: [four[0], four[2]], B: [four[1], four[3]] },
+                { A: [four[0], four[3]], B: [four[1], four[2]] },
+              ];
 
-              const opt = chooseBestTeams(
-                four,
-                partnerCount,
-                opponentCount,
-                gamesPlayed
-              );
+              for (const opt of options) {
+                let s = 0;
+                const [p1, p2] = opt.A;
+                const [p3, p4] = opt.B;
 
-              const s = scoreMatch(
-                opt.A[0],
-                opt.A[1],
-                opt.B[0],
-                opt.B[1],
-                partnerCount,
-                opponentCount,
-                gamesPlayed
-              );
+                // 1. Positional Penalty
+                if (sideAssignments) {
+                  if (sideAssignments[p1] === sideAssignments[p2]) s += 200000;
+                  if (sideAssignments[p3] === sideAssignments[p4]) s += 200000;
+                }
 
-              if (s < bestScore) {
-                bestScore = s;
-                bestChoice = {
-                  teams: {
-                    A: [...opt.A],
-                    B: [...opt.B],
-                  },
-                };
+                // 2. Partner Cooldown & Repetition
+                [
+                  [p1, p2],
+                  [p3, p4],
+                ].forEach(([a, b]) => {
+                  const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+                  const diff = r - (lastPartnerRound[key] || -100);
+                  if (diff < N / 2) s += 100000 / diff;
+                  s += (partnerCount[a]?.[b] || 0) * 20000;
+                });
+
+                // 3. Opponent Variety
+                [
+                  [p1, p3],
+                  [p1, p4],
+                  [p2, p3],
+                  [p2, p4],
+                ].forEach(([a, b]) => {
+                  s += (opponentCount[a]?.[b] || 0) * 1000;
+                });
+
+                // 4. Jitter
+                s += Math.random();
+
+                if (s < bestScore) {
+                  bestScore = s;
+                  bestCombo = opt;
+                }
               }
             }
           }
         }
       }
 
-      if (!bestChoice) break;
-
-      round.push(bestChoice);
-      matchesCreated++;
-
-      const players = [...bestChoice.teams.A, ...bestChoice.teams.B];
-      players.forEach((p) => usedThisRound.add(p));
-
-      applyMatchStats(bestChoice, partnerCount, opponentCount, gamesPlayed);
-
-      if (matchesCreated >= targetMatches) break;
+      if (bestCombo) {
+        roundMatches.push({ teams: bestCombo });
+        applyMatchStats(
+          { teams: bestCombo },
+          partnerCount,
+          opponentCount,
+          gamesPlayed,
+          lastPartnerRound,
+          r
+        );
+        [...bestCombo.A, ...bestCombo.B].forEach((p) => usedThisRound.add(p));
+        matchesCreated++;
+        if (matchesCreated >= totalMatchesTarget) break;
+      }
     }
 
-    if (round.length === 0) break;
-
-    rounds.push(round);
+    if (roundMatches.length > 0) rounds.push(roundMatches);
+    if (matchesCreated >= totalMatchesTarget) break;
   }
-
-  rounds.sort((a, b) => b.length - a.length);
   return rounds;
+}
+
+function updateStats(
+  match,
+  partnerCount,
+  opponentCount,
+  lastPartnerRound,
+  roundNum
+) {
+  const teams = [match.teams.A, match.teams.B];
+  teams.forEach((team) => {
+    const [a, b] = team;
+    const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+    partnerCount[a] = partnerCount[a] || {};
+    partnerCount[a][b] = (partnerCount[a][b] || 0) + 1;
+    partnerCount[b] = partnerCount[b] || {};
+    partnerCount[b][a] = (partnerCount[b][a] || 0) + 1;
+    lastPartnerRound[key] = roundNum;
+  });
 }
 
 // ============================================================================
@@ -656,20 +721,31 @@ async function generateAmericanoStageMatches({
   participants,
   courtsCount,
   client,
+  sideAssignments,
 }) {
   const n = participants?.length || 0;
 
-  if (isPerfectAmericano(n)) {
-    return generatePerfectAmericanoStageMatches({
-      tournamentId,
-      stageId,
-      participants,
-      courtsCount,
-      client,
-    });
+  // If we have side assignments, we MUST use the balanced heuristic.
+  // The 'Perfect' circle method cannot handle L/R constraints.
+  if (isPerfectAmericano(n) && !sideAssignments) {
+    const stableSeed = Number(String(tournamentId).slice(-6)) || 1;
+    try {
+      const rounds = buildPerfectAmericanoRoundsWithRetries(
+        participants,
+        courtsCount,
+        stableSeed
+      );
+      return persistRounds(rounds, tournamentId, stageId, client);
+    } catch (e) {
+      // Fallback to balanced if perfect fails packing
+    }
   }
 
-  const rounds = buildBalancedAmericanoRounds(participants, courtsCount);
+  const rounds = buildBalancedAmericanoRounds(
+    participants,
+    courtsCount,
+    sideAssignments
+  );
   return persistRounds(rounds, tournamentId, stageId, client);
 }
 

@@ -215,3 +215,31 @@ exports.getFeaturedSponsorByTournamentId = async (req, res, next) => {
     next(err);
   }
 };
+
+exports.getPublicTournaments = async (req, res, next) => {
+  try {
+    const page = Math.max(Number(req.query.page) || 0, 0);
+    const size = Math.min(Number(req.query.size) || 10, 50);
+
+    const result = await tournamentService.getPublicTournamentsPaginated({
+      page,
+      size,
+      category: req.query.category,
+      city: req.query.city,
+      status:
+        req.query.status === "upcoming"
+          ? "pending"
+          : req.query.status === "completed"
+          ? "completed"
+          : null,
+      search: req.query.search,
+      sortBy: req.query.sortBy,
+      sortOrder: req.query.sortOrder,
+    });
+
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching public tournaments", error);
+    next(error);
+  }
+};
